@@ -53,31 +53,34 @@ class NPCScenarioTester:
         self.total_score = 0
         self.total_interactions = 0
         self.test_results = []
+        # 讀取提示詞
+        try:
+            with open('prompts.yaml', 'r', encoding='utf-8') as file:
+                self.prompts = yaml.safe_load(file)
+        except FileNotFoundError:
+            print("錯誤：找不到 prompts.yaml 檔案")
+            raise
+        except yaml.YAMLError as e:
+            print(f"錯誤：YAML 檔案格式不正確: {e}")
+            raise
 
     async def evaluate_response(self, response: str, context: dict) -> DeviationMetrics:
         """使用 Gemini 評估回應品質"""
-        prompt = f"""
-        背景：一位口腔癌手術後的病患與醫護人員對話
-        當前對話狀態：{context['current_state']}
-        玩家輸入：{context['player_input']}
-        NPC回應：{response}
+        try:
+            # 從 YAML 讀取提示詞模板並填入變數
+            prompt = self.prompts['evaluation_prompt'].format(
+                current_state=context['current_state'],
+                player_input=context['player_input'],
+                response=response
+            )
+        except KeyError as e:
+            print(f"錯誤：提示詞模板中缺少必要的鍵值: {e}")
+            raise
+        except ValueError as e:
+            print(f"錯誤：提示詞格式化失敗: {e}")
+            raise
         
-        請評估以下指標（0-1分）並以 JSON 格式回傳：
-        1. 語意相關性：回應與當前情境的相關程度
-        2. 目標一致性：是否符合病患角色設定
-        3. 時序連貫性：與對話脈絡的連貫程度
-        4. 回應適當性：回應的整體合適程度
-        
-        請只回傳 JSON 格式，不要有其他說明文字，格式如下：
-        {{
-            "semantic_relevance": 0.8,
-            "goal_alignment": 0.7,
-            "temporal_coherence": 0.9,
-            "response_appropriateness": 0.8
-        }}
-        """
-        
-        # 使用 gemini 實例 (移除 await)
+        # 使用 gemini 實例
         evaluation = model.generate_content(prompt)
         # 解析 Gemini 的評估結果
         metrics = self._parse_metrics(evaluation.text)
