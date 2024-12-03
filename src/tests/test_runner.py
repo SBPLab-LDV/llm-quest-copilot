@@ -45,17 +45,12 @@ class TestMetrics:
 class NPCScenarioTester:
     def __init__(self, dialogue_manager: DialogueManager):
         self.dialogue_manager = dialogue_manager
+        self.gemini_client = GeminiClient()
+        self.logger = setup_logger('npc_tester')
+        self.prompts = dialogue_manager.prompts  # 使用 DialogueManager 的提示詞
         self.total_score = 0
         self.total_interactions = 0
         self.test_results = []
-        self.gemini_client = GeminiClient()
-        self.logger = setup_logger('npc_tester')
-        
-        # 修改 prompts 路徑
-        prompts_path = Path(__file__).parent.parent.parent / 'prompts' / 'dialogue_prompts.yaml'
-        with open(prompts_path, 'r', encoding='utf-8') as f:
-            self.prompts = yaml.safe_load(f)
-
         self.test_metrics = TestMetrics(
             total_turns=0,
             successful_turns=0,
@@ -65,25 +60,9 @@ class NPCScenarioTester:
             state_changes={}
         )
 
-    async def run_tests(self):
-        """運行所有測試情境"""
-        self.logger.info("開始執行自動化NPC情境測試")
-        scenarios = load_test_scenarios()
-        print("\n=== 自動化NPC情境測試 ===")
-        
-        for scenario in scenarios:
-            evaluation = await self._test_single_scenario(scenario)
-            print(f"\n=== {scenario['name']} 測試結果 ===")
-            print(f"整體一致性: {evaluation.overall_consistency:.2f}")
-            print(f"情境變化準確率: {evaluation.scenario_change_accuracy:.2f}")
-            print(f"回應適當性: {evaluation.response_appropriateness:.2f}")
-            
-
     async def _test_single_scenario(self, scenario) -> DialogueEvaluation:
-        """測試單個情境"""
         turn_evaluations = []
         scenario_score = 0
-        previous_state = self.dialogue_manager.current_state.value
         
         self.logger.info(f"\n[開始測試情境 {scenario['name']}]")
         
@@ -94,24 +73,23 @@ class NPCScenarioTester:
             self.logger.info(f"\n--- 回合 {turn_num} ---")
             self.logger.info(f"玩家輸入: {user_input}")
             
-            # 獲取 NPC 回應
+            # 步驟 1: 使用 character_response 獲取回應
             response = await self.dialogue_manager.process_turn(user_input)
             self.logger.info(f"NPC回應: {response}")
             
             # 分析當前狀態
             state_match = re.search(r'當前對話狀態: (\w+)', response)
             current_state = state_match.group(1) if state_match else "UNKNOWN"
-            actual_change = self._check_state_change(previous_state, current_state)
-            previous_state = current_state
+            actual_change = current_state == 'TRANSITIONING'
             
-            # 評估回應
+            # 步驟 2: 使用 evaluation_prompt 評估回應
             context = {
                 'current_state': current_state,
                 'player_input': user_input
             }
             metrics = await self._evaluate_response(response, context)
             self.logger.info(f"評估結果: {metrics}")
-            
+
             # 記錄評估結果
             turn_eval = TurnEvaluation(
                 player_message=user_input,
@@ -127,24 +105,60 @@ class NPCScenarioTester:
             # 更新分數
             if actual_change == expected_change:
                 scenario_score += 1
-            
-            self._print_turn_evaluation(turn_eval)
 
-        # 計算整體評估結果
-        evaluation = DialogueEvaluation(
+        # 返回評估結果
+        return DialogueEvaluation(
             scenario_name=scenario['name'],
             turn_evaluations=turn_evaluations,
             overall_consistency=self._calculate_consistency(turn_evaluations),
             scenario_change_accuracy=scenario_score / len(scenario['interactions']),
             response_appropriateness=self._calculate_appropriateness(turn_evaluations)
         )
+
+    async def run_tests(self):
+        """運行所有測試情境"""
+        self.logger.info("開始執行自動化NPC情境測試")
+        scenarios = load_test_scenarios()
         
-        self.logger.info(f"\n=== {scenario['name']} 測試結果 ===")
-        self.logger.info(f"整體一致性: {evaluation.overall_consistency:.2f}")
-        self.logger.info(f"情境變化準確率: {evaluation.scenario_change_accuracy:.2f}")
-        self.logger.info(f"回應適當性: {evaluation.response_appropriateness:.2f}")
+        for scenario in scenarios:
+            evaluation = await self._test_single_scenario(scenario)
+            self.logger.info(f"\n=== {scenario['name']} 測試結果 ===")
+            self.logger.info(f"整體一致性: {evaluation.overall_consistency:.2f}")
+            self.logger.info(f"情境變化準確率: {evaluation.scenario_change_accuracy:.2f}")
+            self.logger.info(f"回應適當性: {evaluation.response_appropriateness:.2f}")
+            
+            # 更新測試指標
+            self.test_metrics.total_turns += len(evaluation.turn_evaluations)
+            self.test_metrics.average_consistency += evaluation.overall_consistency
+            self.test_metrics.average_appropriateness += evaluation.response_appropriateness
+            
+            # 計算成功和失敗的回合
+            for turn in evaluation.turn_evaluations:
+                if turn.expected_scenario_change == turn.actual_scenario_change:
+                    self.test_metrics.successful_turns += 1
+                else:
+                    self.test_metrics.failed_turns += 1
+                    
+                # 記錄狀態轉換
+                state_key = f"{turn.current_state}"
+                self.test_metrics.state_changes[state_key] = self.test_metrics.state_changes.get(state_key, 0) + 1
         
-        return evaluation
+        # 計算平均值
+        scenario_count = len(scenarios)
+        if scenario_count > 0:
+            self.test_metrics.average_consistency /= scenario_count
+            self.test_metrics.average_appropriateness /= scenario_count
+        
+        # 輸出總體測試結果
+        self.logger.info("\n=== 總體測試結果 ===")
+        self.logger.info(f"總回合數: {self.test_metrics.total_turns}")
+        self.logger.info(f"成功回合: {self.test_metrics.successful_turns}")
+        self.logger.info(f"失敗回合: {self.test_metrics.failed_turns}")
+        self.logger.info(f"平均一致性: {self.test_metrics.average_consistency:.2f}")
+        self.logger.info(f"平均適當性: {self.test_metrics.average_appropriateness:.2f}")
+        self.logger.info("狀態轉換統計:")
+        for state, count in self.test_metrics.state_changes.items():
+            self.logger.info(f"- {state}: {count} 次")
 
     async def _evaluate_response(self, response: str, context: dict) -> DeviationMetrics:
         """評估回應品質"""
@@ -168,8 +182,7 @@ class NPCScenarioTester:
             
         except Exception as e:
             self.logger.error(f"評估回應時發生錯誤: {e}")
-            self.logger.error(f"回應內容: {response}")
-            self.logger.error(f"上下文: {context}")
+            self.logger.error(f"Gemini 回傳內容: {evaluation}")
             return DeviationMetrics(
                 semantic_relevance=0.5,
                 goal_alignment=0.5,
@@ -197,7 +210,7 @@ class NPCScenarioTester:
                     required_keys = ['semantic_relevance', 'goal_alignment', 
                                   'temporal_coherence', 'response_appropriateness']
                     if all(key in metrics_dict for key in required_keys):
-                        # 確保所有值都是���字且在 0-1 之間
+                        # 確保所有值都是數字且在 0-1 之間
                         metrics = {}
                         for key in required_keys:
                             value = float(metrics_dict[key])
@@ -219,19 +232,6 @@ class NPCScenarioTester:
                 response_appropriateness=0.5
             )
 
-    def _print_turn_evaluation(self, eval: TurnEvaluation):
-        """輸出回合評估結果"""
-        print(f"\n=== 回合 {eval.turn_number} 評估 ===")
-        print(f"玩家輸入: {eval.player_message}")
-        print(f"NPC回應: {eval.generated_response}")
-        print(f"預期情境變化: {eval.expected_scenario_change}")
-        print(f"實際情境變化: {eval.actual_scenario_change}")
-        print("\n品質評估:")
-        print(f"- 語意相關性: {eval.metrics.semantic_relevance:.2f}")
-        print(f"- 目標一致性: {eval.metrics.goal_alignment:.2f}")
-        print(f"- 時序連貫性: {eval.metrics.temporal_coherence:.2f}")
-        print(f"- 回應適當性: {eval.metrics.response_appropriateness:.2f}")
-
     def _calculate_consistency(self, evaluations: List[TurnEvaluation]) -> float:
         """計算整體一致性"""
         if not evaluations:
@@ -243,23 +243,3 @@ class NPCScenarioTester:
         if not evaluations:
             return 0.0
         return sum(e.metrics.response_appropriateness for e in evaluations) / len(evaluations)
-
-    def _check_state_change(self, previous_state: str, current_state: str) -> bool:
-        """檢查狀態是否發生變化"""
-        return previous_state != current_state
-
-    def _log_test_results(self, evaluation: DialogueEvaluation):
-        """記錄測試結果"""
-        self.logger.info(f"\n=== {evaluation.scenario_name} 詳細測試結果 ===")
-        self.logger.info(f"總回合數: {len(evaluation.turn_evaluations)}")
-        self.logger.info(f"整體一致性: {evaluation.overall_consistency:.2f}")
-        self.logger.info(f"情境變化準確率: {evaluation.scenario_change_accuracy:.2f}")
-        self.logger.info(f"回應適當性: {evaluation.response_appropriateness:.2f}")
-        
-        # 記錄每個回合的詳細資訊
-        for turn in evaluation.turn_evaluations:
-            self.logger.info(f"\n回合 {turn.turn_number}:")
-            self.logger.info(f"玩家輸入: {turn.player_message}")
-            self.logger.info(f"NPC回應: {turn.generated_response}")
-            self.logger.info(f"狀態: {turn.current_state}")
-            self.logger.info(f"評估指標: {turn.metrics}")
