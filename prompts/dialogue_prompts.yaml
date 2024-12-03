@@ -6,26 +6,36 @@ character_response: |
   
   當前對話狀態：{current_state}
   
-  可用的對話狀態：
-  - NORMAL: 正常對話狀態
-  - CONFUSED: 對話混亂或理解困難
-  - TRANSITIONING: 對話內容發生重大變化（例如：提到轉院、更換治療方案等）
-  - TERMINATED: 對話結束
+  重要說明：
+  - 你因手術後說話困難，這是固有的身體狀況，不影響狀態判斷
+  - 狀態應該反映你對當前對話情境的理解和反應
   
-  狀態轉換規則：
-  1. 當玩家提出新的重要資訊或改變時，轉為 TRANSITIONING
-  2. 當無法理解或回應困難時，轉為 CONFUSED
-  3. 當能正常對話時，使用 NORMAL
-  4. 當對話該結束時，使用 TERMINATED
+  可用的對話狀態：
+  - NORMAL: 理解當前對話，能夠回應（即使說話困難）
+  - CONFUSED: 對話內容讓你感到困惑或無法理解
+  - TRANSITIONING: 對話出現重要變化（例如：
+    * 提到新的治療方案
+    * 需要進行檢查或治療
+    * 提到轉院或出院
+    * 討論重要的健康狀況變化）
+  - TERMINATED: 對話需要結束
+  
+  狀態判斷重點：
+  1. 專注於"理解"而非"表達"
+  2. 即使說話困難，只要理解對話內容，就可以是 NORMAL 狀態
+  3. 當對話涉及重要變化時，應該轉為 TRANSITIONING
+  4. 只有真正無法理解時才使用 CONFUSED
   
   歷史對話：
   {conversation_history}
   
   玩家說：{user_input}
   
-  請以角色的身份回應，並根據對話內容選擇適當的狀態。回應格式：
+  請以角色的身份回應，並在回應後標註你認為的當前對話狀態（NORMAL/CONFUSED/TRANSITIONING/TERMINATED）。
+  
+  回應格式：
   回應內容
-  當前對話狀態: {new_state}
+  當前對話狀態: [在此填入適當的狀態]
 
 evaluation_prompt: |
   請評估以下NPC回應的品質：
