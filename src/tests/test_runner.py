@@ -135,13 +135,16 @@ class NPCScenarioTester:
                 player_input=context['player_input'],
                 response=response
             )
-            print(f"\n評估提示: {prompt}")
+            self.logger.info(f"評估提示: {prompt}")
             
             # 使用 Gemini 評估
             evaluation = self.gemini_client.generate_response(prompt)
+            self.logger.info(f"Gemini 原始回應: {evaluation}")
             
             # 解析評估結果
-            return self._parse_metrics(evaluation)
+            metrics = self._parse_metrics(evaluation)
+            self.logger.info(f"解析後的評估結果: {metrics}")
+            return metrics
             
         except Exception as e:
             self.logger.error(f"評估回應時發生錯誤: {e}")
@@ -157,15 +160,37 @@ class NPCScenarioTester:
         """解析評估結果"""
         try:
             import json
-            metrics_dict = json.loads(evaluation_text)
-            return DeviationMetrics(
-                semantic_relevance=float(metrics_dict['semantic_relevance']),
-                goal_alignment=float(metrics_dict['goal_alignment']),
-                temporal_coherence=float(metrics_dict['temporal_coherence']),
-                response_appropriateness=float(metrics_dict['response_appropriateness'])
-            )
-        except (json.JSONDecodeError, KeyError) as e:
-            print(f"解析評估結果時發生錯誤: {e}")
+            import re
+            
+            # 嘗試找出 JSON 部分
+            json_pattern = r'\{[\s\S]*?\}'
+            matches = re.finditer(json_pattern, evaluation_text)
+            
+            # 嘗試解析每個可能的 JSON 字串
+            for match in matches:
+                try:
+                    json_str = match.group(0)
+                    metrics_dict = json.loads(json_str)
+                    
+                    # 驗證所有必要的鍵是否存在
+                    required_keys = ['semantic_relevance', 'goal_alignment', 
+                                  'temporal_coherence', 'response_appropriateness']
+                    if all(key in metrics_dict for key in required_keys):
+                        # 確保所有值都是數字且在 0-1 之間
+                        metrics = {}
+                        for key in required_keys:
+                            value = float(metrics_dict[key])
+                            metrics[key] = max(0.0, min(1.0, value))
+                        
+                        return DeviationMetrics(**metrics)
+                except (json.JSONDecodeError, ValueError, KeyError):
+                    continue
+            
+            raise ValueError("無法找到有效的評估結果")
+            
+        except Exception as e:
+            self.logger.error(f"解析評估結果時發生錯誤: {e}")
+            self.logger.error(f"評估文本: {evaluation_text}")
             return DeviationMetrics(
                 semantic_relevance=0.5,
                 goal_alignment=0.5,
