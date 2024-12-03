@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import List
 import re
+import yaml
+from pathlib import Path
 from ..core.dialogue import DialogueManager
 from ..llm.gemini_client import GeminiClient
 from .test_scenarios.scenarios import load_test_scenarios
@@ -39,6 +41,11 @@ class NPCScenarioTester:
         self.test_results = []
         self.gemini_client = GeminiClient()
         self.logger = setup_logger('npc_tester')
+        
+        # 修改 prompts 路徑
+        prompts_path = Path(__file__).parent.parent.parent / 'prompts' / 'dialogue_prompts.yaml'
+        with open(prompts_path, 'r', encoding='utf-8') as f:
+            self.prompts = yaml.safe_load(f)
 
     async def run_tests(self):
         """運行所有測試情境"""
@@ -52,20 +59,25 @@ class NPCScenarioTester:
             print(f"整體一致性: {evaluation.overall_consistency:.2f}")
             print(f"情境變化準確率: {evaluation.scenario_change_accuracy:.2f}")
             print(f"回應適當性: {evaluation.response_appropriateness:.2f}")
+            
 
     async def _test_single_scenario(self, scenario) -> DialogueEvaluation:
         """測試單個情境"""
         turn_evaluations = []
         scenario_score = 0
         
-        print(f"\n[情境 {scenario['name']}]")
+        self.logger.info(f"\n[開始測試情境 {scenario['name']}]")
         
         for turn_num, interaction in enumerate(scenario['interactions'], 1):
             user_input = interaction['input']
             expected_change = interaction.get('scenario_changed', False)
             
+            self.logger.info(f"\n--- 回合 {turn_num} ---")
+            self.logger.info(f"玩家輸入: {user_input}")
+            
             # 獲取 NPC 回應
             response = await self.dialogue_manager.process_turn(user_input)
+            self.logger.info(f"NPC回應: {response}")
             
             # 分析當前狀態
             state_match = re.search(r'當前對話狀態: (\w+)', response)
@@ -78,6 +90,7 @@ class NPCScenarioTester:
                 'player_input': user_input
             }
             metrics = await self._evaluate_response(response, context)
+            self.logger.info(f"評估結果: {metrics}")
             
             # 記錄評估結果
             turn_eval = TurnEvaluation(
@@ -95,17 +108,23 @@ class NPCScenarioTester:
             if actual_change == expected_change:
                 scenario_score += 1
             
-            # 輸出詳細資訊
             self._print_turn_evaluation(turn_eval)
 
         # 計算整體評估結果
-        return DialogueEvaluation(
+        evaluation = DialogueEvaluation(
             scenario_name=scenario['name'],
             turn_evaluations=turn_evaluations,
             overall_consistency=self._calculate_consistency(turn_evaluations),
             scenario_change_accuracy=scenario_score / len(scenario['interactions']),
             response_appropriateness=self._calculate_appropriateness(turn_evaluations)
         )
+        
+        self.logger.info(f"\n=== {scenario['name']} 測試結果 ===")
+        self.logger.info(f"整體一致性: {evaluation.overall_consistency:.2f}")
+        self.logger.info(f"情境變化準確率: {evaluation.scenario_change_accuracy:.2f}")
+        self.logger.info(f"回應適當性: {evaluation.response_appropriateness:.2f}")
+        
+        return evaluation
 
     async def _evaluate_response(self, response: str, context: dict) -> DeviationMetrics:
         """評估回應品質"""
@@ -116,6 +135,7 @@ class NPCScenarioTester:
                 player_input=context['player_input'],
                 response=response
             )
+            print(f"\n評估提示: {prompt}")
             
             # 使用 Gemini 評估
             evaluation = self.gemini_client.generate_response(prompt)
@@ -124,7 +144,8 @@ class NPCScenarioTester:
             return self._parse_metrics(evaluation)
             
         except Exception as e:
-            print(f"評估回應時發生錯誤: {e}")
+            self.logger.error(f"評估回應時發生錯誤: {e}")
+            self.logger.error(f"Gemini 回傳內容: {evaluation}")
             return DeviationMetrics(
                 semantic_relevance=0.5,
                 goal_alignment=0.5,

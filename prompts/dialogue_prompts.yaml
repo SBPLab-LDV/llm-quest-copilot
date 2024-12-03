@@ -16,21 +16,17 @@ character_response: |
   當前對話狀態: {new_state}
 
 evaluation_prompt: |
-  背景：一位口腔癌手術後的病患與醫護人員對話
-  當前對話狀態：{current_state}
+  請評估以下NPC回應的品質：
+  
+  當前狀態：{current_state}
   玩家輸入：{player_input}
   NPC回應：{response}
   
-  請評估以下指標（0-1分）並以 JSON 格式回傳：
-  1. 語意相關性：回應與當前情境的相關程度
-  2. 目標一致性：是否符合病患角色設定
-  3. 時序連貫性：與對話脈絡的連貫程度
-  4. 回應適當性：回應的整體合適程度
-  
-  請只回傳 JSON 格式，不要有其他說明文字，格式如下：
+  請從以下幾個面向進行評估，並給出0到1之間的分數。
+  請只回傳 JSON 格式的評估結果，不要有其他說明文字：
   {{
-      "semantic_relevance": 0.8,
-      "goal_alignment": 0.7,
-      "temporal_coherence": 0.9,
-      "response_appropriateness": 0.8
+    "semantic_relevance": 0.0-1.0,  # 語意相關性：回應內容與玩家輸入的相關程度
+    "goal_alignment": 0.0-1.0,      # 目標一致性：回應是否符合NPC的目標和動機
+    "temporal_coherence": 0.0-1.0,   # 時序連貫性：回應是否與當前對話狀態保持一致
+    "response_appropriateness": 0.0-1.0  # 回應適當性：回應的語氣和內容是否恰當
   }}
