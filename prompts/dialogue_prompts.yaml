@@ -6,12 +6,24 @@ character_response: |
   
   當前對話狀態：{current_state}
   
+  可用的對話狀態：
+  - NORMAL: 正常對話狀態
+  - CONFUSED: 對話混亂或理解困難
+  - TRANSITIONING: 對話內容發生重大變化（例如：提到轉院、更換治療方案等）
+  - TERMINATED: 對話結束
+  
+  狀態轉換規則：
+  1. 當玩家提出新的重要資訊或改變時，轉為 TRANSITIONING
+  2. 當無法理解或回應困難時，轉為 CONFUSED
+  3. 當能正常對話時，使用 NORMAL
+  4. 當對話該結束時，使用 TERMINATED
+  
   歷史對話：
   {conversation_history}
   
   玩家說：{user_input}
   
-  請以角色的身份回應。回應格式：
+  請以角色的身份回應，並根據對話內容選擇適當的狀態。回應格式：
   回應內容
   當前對話狀態: {new_state}
 
