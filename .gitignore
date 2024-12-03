@@ -1,0 +1,12 @@
+# 設定檔
+config.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+
+# IDE
+.vscode/
+.idea/ 

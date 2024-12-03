@@ -7,7 +7,18 @@ from typing import List
 from NPC import DialogueManager, Character, DialogueState
 import google.generativeai as genai  # 直接導入 genai
 
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', 'AIzaSyAfjRGMGWSXn7Kf6qnj4IQezhXh1ZaeLJ0')
+# 讀取設定檔
+try:
+    with open('config.yaml', 'r', encoding='utf-8') as file:
+        config = yaml.safe_load(file)
+        GOOGLE_API_KEY = config.get('google_api_key')
+except FileNotFoundError:
+    # 如果找不到設定檔，嘗試從環境變數讀取
+    GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+    if not GOOGLE_API_KEY:
+        raise ValueError("找不到 Google API Key，請在 config.yaml 設定或設定環境變數 GOOGLE_API_KEY")
+
+# 設定 Gemini
 genai.configure(api_key=GOOGLE_API_KEY)
 # 初始化 Gemini 模型
 model = genai.GenerativeModel('gemini-1.5-flash')
