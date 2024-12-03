@@ -1,0 +1,22 @@
+scenarios:
+  - name: 基本醫療對話
+    interactions:
+      - input: 你昨晚睡得好嗎？
+        scenario_changed: false
+      - input: 你現在感覺怎麼樣？
+        scenario_changed: false
+      - input: 我來幫你量體溫
+        scenario_changed: true
+      - input: 我剛剛說的你聽清楚了嗎？
+        scenario_changed: false
+
+  - name: 複雜醫療對話
+    interactions:
+      - input: 妳的手術傷口還痛嗎？
+        scenario_changed: false
+      - input: 護士正在準備你的藥物
+        scenario_changed: true
+      - input: 醫生一會兒會來看妳
+        scenario_changed: false
+      - input: 我們現在要轉院
+        scenario_changed: true 
