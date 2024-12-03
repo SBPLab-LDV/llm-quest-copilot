@@ -12,6 +12,7 @@ async def run_tests():
         goal="希望能夠與醫護人員溝通，讓他們了解自己的狀況"
     )
     print(character)
+    print(character.name)
     
     # 創建對話管理器
     manager = DialogueManager(character)
