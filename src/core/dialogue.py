@@ -30,8 +30,7 @@ class DialogueManager:
             goal=self.character.goal,
             current_state=self.current_state.value,
             conversation_history=self._format_conversation_history(),
-            user_input=user_input,
-            new_state="{new_state}"  # 這會被 Gemini 的回應替換
+            user_input=user_input
         )
 
         # 獲取回應
