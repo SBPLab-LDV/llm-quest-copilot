@@ -38,8 +38,10 @@ class DialogueManager:
         
         # 解析回應和狀態
         response_lines = response.strip().split('\n')
-        response_content = response_lines[0]
-        
+        response_content = "\n"
+        for i in range(1, len(response_lines) - 1):
+            response_content += response_lines[i] + '\n'
+            
         # 更新狀態
         if len(response_lines) > 1 and "當前對話狀態:" in response_lines[-1]:
             new_state = response_lines[-1].split(': ')[1].strip()
