@@ -16,6 +16,8 @@ llm-quest-copilot/
 │   ├── utils/                # 工具函數
 │   │   ├── config.py        # 設定檔讀取
 │   │   └── logger.py        # 日誌功能
+│   ├── gui/                  # 圖形介面
+│   │   └── chat_window.py    # 對話視窗
 │   └── tests/                # 測試相關
 │       └── test_scenarios/   # 測試情境
 ├── config/                   # 設定檔
@@ -64,9 +66,27 @@ cp config.example.yaml config/config.yaml
      - evaluation_prompt
    - test_scenarios.yaml 需包含測試情境定義
 
-## 執行測試
+## 執行方式
 
-1. 直接執行測試：
+1. 命令列介面：
+```bash
+python main.py
+```
+- 在終端機中進行對話
+- 使用數字選擇病患
+- 輸入文字進行對話
+- 使用 'quit' 或 'exit' 結束對話
+
+2. 圖形化介面：
+```bash
+python gui_main.py
+```
+- 提供視窗化操作介面
+- 點擊按鈕選擇病患
+- 在文字框輸入對話
+- 關閉視窗結束對話
+
+3. 執行自動化測試：
 ```bash
 python run_tests.py
 ```
@@ -94,6 +114,7 @@ python run_tests.py
 
 - google-generativeai
 - pyyaml
+- tkinter (GUI介面，Python內建)
 - python-dotenv (可選)
 
 ## 開發指南
@@ -109,6 +130,10 @@ python run_tests.py
 3. 自定義評估指標：
    - 修改 `src/tests/test_runner.py` 中的評估邏輯
    - 更新 DeviationMetrics 資料類別
+
+4. 自定義GUI介面：
+   - 修改 `src/gui/chat_window.py`
+   - 可以調整視窗大小、樣式和功能
 
 ## 疑難排解
 
