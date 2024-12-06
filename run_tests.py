@@ -4,7 +4,7 @@ from src.core.dialogue import DialogueManager
 from src.tests.test_runner import NPCScenarioTester
 
 async def run_tests():
-    # 創建角色實例
+    # 創建病患實例
     character = Character(
         name="Elena",
         persona="一位剛動完手術的口腔癌患者",

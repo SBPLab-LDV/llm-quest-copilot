@@ -36,7 +36,7 @@
 llm-quest-copilot/
 ├── src/                    # 源代碼目錄
 │   ├── core/              # 核心功能模組
-│   │   ├── character.py   # 角色相關
+│   │   ├── character.py   # 病患相關
 │   │   ├── dialogue.py    # 對話管理
 │   │   └── state.py       # 狀態管理
 │   ├── llm/               # LLM 相關功能
@@ -50,7 +50,7 @@ llm-quest-copilot/
 ## 主要改進
 
 1. **核心功能模組化**
-   - Character: 角色基本資訊管理
+   - Character: 病患基本資訊管理
    - DialogueManager: 對話流程控制
    - DialogueState: 狀態定義和轉換
 

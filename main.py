@@ -8,7 +8,7 @@ async def chat_with_npc():
     logger = setup_logger('npc_chat')
     logger.info("開始NPC對話系統")
 
-    # 創建角色實例
+    # 創建病患實例
     character = Character(
         name="Elena",
         persona="一位剛動完手術的口腔癌患者",
@@ -21,7 +21,7 @@ async def chat_with_npc():
     
     # 顯示歡迎訊息
     print(f"\n=== 與 {character.name} 對話 ===")
-    print(f"角色背景: {character.persona}")
+    print(f"病患背景: {character.persona}")
     print(f"目標: {character.goal}")
     print("\n輸入 'quit' 或 'exit' 結束對話")
     

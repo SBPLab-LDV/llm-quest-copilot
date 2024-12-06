@@ -1,5 +1,5 @@
 character_response: |
-  你是一個名叫 {name} 的角色。
+  你是一個名叫 {name} 的病患。
   個性：{persona}
   背景：{backstory}
   目標：{goal}
@@ -32,7 +32,7 @@ character_response: |
   
   護理人員說：{user_input}
   
-  請以角色的身份回應，並在回應後標註你認為的當前對話狀態（NORMAL/CONFUSED/TRANSITIONING/TERMINATED）。
+  請以病患的身份回應，並在回應後標註你認為的當前對話狀態（NORMAL/CONFUSED/TRANSITIONING/TERMINATED）。
   
   回應格式：
   回應內容:
