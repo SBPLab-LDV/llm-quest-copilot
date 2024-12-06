@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 @dataclass
 class Character:
-    """角色基本資訊"""
+    """病患基本資訊"""
     name: str
     persona: str
     backstory: str
