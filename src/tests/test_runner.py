@@ -63,6 +63,7 @@ class NPCScenarioTester:
     def _showing_the_testing_rules(self, have_shown_rules):
         if(not have_shown_rules):
             prompts = self.prompts['evaluation_prompt'].format(
+                conversation_history="待輸入",
                 current_state="待輸入",
                 player_input="待輸入",
                 response="待輸入")
@@ -72,10 +73,6 @@ class NPCScenarioTester:
         turn_evaluations = []
         scenario_score = 0
 
-        have_shown_rules = False
-        self._showing_the_testing_rules(have_shown_rules)
-        have_shown_rules = True
-        
         self.logger.info(f"\n\n[開始測試情境 {scenario['name']}]")
         
         for turn_num, interaction in enumerate(scenario['interactions'], 1):
@@ -85,7 +82,7 @@ class NPCScenarioTester:
             self.logger.info(f"\n\n--- 回合 {turn_num} ---")
             self.logger.info(f"護理人員輸入: {user_input}")
             
-            # 步驟 1: 使用 character_response 獲取回應
+            # 步驟 1: 使用 character_response 獲取回應;
             response = await self.dialogue_manager.process_turn(user_input)
             self.logger.info(f"NPC回應:\n{response}\n")
             
@@ -96,6 +93,7 @@ class NPCScenarioTester:
             
             # 步驟 2: 使用 evaluation_prompt 評估回應
             context = {
+                'conversation_history': self.dialogue_manager.conversation_history[-10:], # 給予最近5輪對話
                 'current_state': current_state,
                 'player_input': user_input
             }
@@ -113,11 +111,13 @@ class NPCScenarioTester:
                 turn_number=turn_num
             )
             turn_evaluations.append(turn_eval)
-            
+
             # 更新分數
             if actual_change == expected_change:
                 scenario_score += 1
-
+        
+        self.dialogue_manager.conversation_history.clear()  # 完成一個情境清空對話歷史  
+        
         # 返回評估結果
         return DialogueEvaluation(
             scenario_name=scenario['name'],
@@ -129,6 +129,11 @@ class NPCScenarioTester:
 
     async def run_tests(self):
         """運行所有測試情境"""
+
+        have_shown_rules = False
+        self._showing_the_testing_rules(have_shown_rules)
+        have_shown_rules = True
+
         self.logger.info("開始執行自動化NPC情境測試")
         scenarios = load_test_scenarios()
         
@@ -178,6 +183,7 @@ class NPCScenarioTester:
         try:
             # 從 YAML 讀取提示詞模板並填入變數
             prompt = self.prompts['evaluation_prompt'].format(
+                conversation_history=context['conversation_history'][-10:],
                 current_state=context['current_state'],
                 player_input=context['player_input'],
                 response=response
@@ -187,7 +193,7 @@ class NPCScenarioTester:
             # 使用 Gemini 評估
             evaluation = self.gemini_client.generate_response(prompt)
             formatted_evaluation = ('\n'.join(evaluation.split('\n')[2:-3]))
-            self.logger.info(f"Gemini 原始回應:\n\n{formatted_evaluation}\n")
+            #self.logger.info(f"Gemini 原始回應:\n\n{formatted_evaluation}\n")
             
             # 解析評估結果
             metrics = self._parse_metrics(evaluation)

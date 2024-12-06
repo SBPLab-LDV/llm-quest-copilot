@@ -50,6 +50,15 @@ class DialogueManager:
             except ValueError:
                 self.current_state = DialogueState.CONFUSED
         
+        # 隨機選擇一個回答進行儲存(未來更改為病患選擇)
+        '''---------------------------------------------------------------------------------------'''
+        import random
+        random_num = random.randint(1,5)
+        random_content = [element for element in response_lines if str(random_num) in element]
+        random_content = random_content[0].split(". ")[1]
+        response_content = random_content
+        '''---------------------------------------------------------------------------------------'''
+
         # 記錄 NPC 回應
         self.conversation_history.append(f"{self.character.name}: {response_content}")
         
