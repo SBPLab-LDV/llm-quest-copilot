@@ -9,4 +9,4 @@ class GeminiClient:
 
     def generate_response(self, prompt: str) -> str:
         response = self.model.generate_content(prompt)
-        return response.text 
+        return response.text

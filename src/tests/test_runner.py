@@ -60,9 +60,21 @@ class NPCScenarioTester:
             state_changes={}
         )
 
+    def _showing_the_testing_rules(self, have_shown_rules):
+        if(not have_shown_rules):
+            prompts = self.prompts['evaluation_prompt'].format(
+                current_state="待輸入",
+                player_input="待輸入",
+                response="待輸入")
+            self.logger.info(f"\n\n評估提示字句:\n\n{prompts}\n")
+
     async def _test_single_scenario(self, scenario) -> DialogueEvaluation:
         turn_evaluations = []
         scenario_score = 0
+
+        have_shown_rules = False
+        self._showing_the_testing_rules(have_shown_rules)
+        have_shown_rules = True
         
         self.logger.info(f"\n\n[開始測試情境 {scenario['name']}]")
         
@@ -75,7 +87,7 @@ class NPCScenarioTester:
             
             # 步驟 1: 使用 character_response 獲取回應
             response = await self.dialogue_manager.process_turn(user_input)
-            self.logger.info(f"NPC回應: {response}\n")
+            self.logger.info(f"NPC回應:\n{response}\n")
             
             # 分析當前狀態
             state_match = re.search(r'當前對話狀態: (\w+)', response)
@@ -87,8 +99,8 @@ class NPCScenarioTester:
                 'current_state': current_state,
                 'player_input': user_input
             }
-            metrics = await self._evaluate_response(response, context)
-            self.logger.info(f"評估結果: {metrics}")
+            metrics = await self._evaluate_response(response.split("當前對話狀態")[0].strip(), context)
+            self.logger.info(f"評估結果:\n\n{metrics}\n")
 
             # 記錄評估結果
             turn_eval = TurnEvaluation(
@@ -170,11 +182,12 @@ class NPCScenarioTester:
                 player_input=context['player_input'],
                 response=response
             )
-            #self.logger.info(f"評估提示: {prompt}")
+            #self.logger.info(f"評估提示:\n{prompt}")
             
             # 使用 Gemini 評估
             evaluation = self.gemini_client.generate_response(prompt)
-            #self.logger.info(f"Gemini 原始回應: {evaluation}")
+            formatted_evaluation = ('\n'.join(evaluation.split('\n')[2:-3]))
+            self.logger.info(f"Gemini 原始回應:\n\n{formatted_evaluation}\n")
             
             # 解析評估結果
             metrics = self._parse_metrics(evaluation)
