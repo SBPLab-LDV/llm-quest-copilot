@@ -20,7 +20,7 @@ class DialogueManager:
     async def process_turn(self, user_input: str) -> str:
         """處理一輪對話"""
         # 記錄用戶輸入
-        self.conversation_history.append(f"玩家: {user_input}")
+        self.conversation_history.append(f"護理人員: {user_input}")
         
         # 準備提示詞
         prompt = self.prompts['character_response'].format(

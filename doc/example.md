@@ -53,7 +53,7 @@ async def evaluate_gemini(
         歷史對話：
         {format_dialogue_history(history)}
         
-        當前玩家發言：{turn.content}
+        當前護理人員發言：{turn.content}
         
         請分析：
         1. 這句話相對於主要任務的偏離程度
@@ -77,8 +77,8 @@ async def evaluate_gemini(
         偏離程度：{deviation.value}
         
         作為Elena，你需要：
-        1. 如果玩家偏離任務，要巧妙地引導他們回到任務
-        2. 如果玩家在任務軌道上，要給予正面鼓勵
+        1. 如果護理人員偏離任務，要巧妙地引導他們回到任務
+        2. 如果護理人員在任務軌道上，要給予正面鼓勵
         3. 保持對話自然且富有同理心
         
         請生成回應：
@@ -170,7 +170,7 @@ async def evaluate_gemini(
 ```python
 # 輸入狀態
 當前狀態 = {
-    "任務背景": "玩家正在與Elena討論如何到達島嶼",
+    "任務背景": "護理人員正在與Elena討論如何到達島嶼",
     "當前對話": "Player: 我看到旁邊有個洞穴，裡面好像有很多資源",
     "歷史對話": [
         "Player: 我們需要多少方塊才能蓋到島上?",
@@ -181,7 +181,7 @@ async def evaluate_gemini(
 # 1. 偏離分析階段
 deviation_analysis = {
     "detected_deviation": DeviationType.SLIGHT,
-    "reason": "玩家關注資源收集，但方向開始偏離主要路徑",
+    "reason": "護理人員關注資源收集，但方向開始偏離主要路徑",
     "confidence": 0.8
 }
 
@@ -222,7 +222,7 @@ metrics = {
     },
     "對話連貫性": {
         "分數": 0.9,
-        "原因": "自然承接玩家的關注點並轉向任務"
+        "原因": "自然承接護理人員的關注點並轉向任務"
     }
 }
 

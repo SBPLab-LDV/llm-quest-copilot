@@ -71,7 +71,7 @@ class NPCScenarioTester:
             expected_change = interaction.get('scenario_changed', False)
             
             self.logger.info(f"\n\n--- 回合 {turn_num} ---")
-            self.logger.info(f"玩家輸入: {user_input}")
+            self.logger.info(f"護理人員輸入: {user_input}")
             
             # 步驟 1: 使用 character_response 獲取回應
             response = await self.dialogue_manager.process_turn(user_input)
