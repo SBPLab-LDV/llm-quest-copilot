@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Union
 import google.generativeai as genai
 import json
 import re
@@ -9,12 +9,13 @@ from ..utils.config import load_prompts
 import keyboard
 
 class DialogueManager:
-    def __init__(self, character: Character):
+    def __init__(self, character: Character, use_terminal: bool = False):
         self.character = character
         self.current_state = DialogueState.NORMAL
         self.conversation_history = []
         self.gemini_client = GeminiClient()
         self.prompts = load_prompts()
+        self.use_terminal = use_terminal
 
     def _format_conversation_history(self) -> str:
         """格式化對話歷史"""
@@ -36,7 +37,7 @@ class DialogueManager:
         
         return text
 
-    async def process_turn(self, user_input: str) -> str:
+    async def process_turn(self, user_input: str) -> Union[str, dict]:
         """處理一輪對話"""
         try:
             # 記錄用戶輸入
@@ -70,9 +71,6 @@ class DialogueManager:
             if not isinstance(response_dict["responses"], list):
                 raise ValueError("回應格式錯誤：responses 不是陣列")
             
-            # 取得回應（現在只會有一個）
-            selected_response = response_dict["responses"][0]
-            
             # 更新狀態
             new_state = response_dict["state"]
             try:
@@ -80,41 +78,48 @@ class DialogueManager:
             except ValueError:
                 self.current_state = DialogueState.CONFUSED
 
-            # 顯示所有選項供使用者選擇
-            print("\n請選擇一個回應選項：")
-            for i, response in enumerate(response_dict["responses"], 1):
-                print(f"{i}. {response}")
-            print("0. 這些選項都不適合（跳過，直接進入下一輪對話）")
-            print("\n請按數字鍵 0-5 選擇選項...")
-            
-            while True:
-                event = keyboard.read_event(suppress=True)
-                if event.event_type == 'down':
-                    if event.name == '0':
-                        print("\n跳過此輪回應，請繼續對話")
-                        self.conversation_history.append("(跳過此輪回應)")
-                        return ""  # 返回空字串，表示跳過此輪
-                    elif event.name == 'q':
-                        print("\n結束對話")
-                        return "quit"
-                    elif event.name in ['1', '2', '3', '4', '5']:
-                        choice = int(event.name)
-                        selected_response = response_dict["responses"][choice - 1]
-                        print(f"\n已選擇選項 {choice}")
-                        # 記錄 NPC 回應
-                        self.conversation_history.append(f"{self.character.name}: {selected_response}")
-                        return f"{selected_response}\n當前對話狀態: {self.current_state.value}"
+            if self.use_terminal:
+                # 在終端機中處理選項
+                print(f"\n{self.character.name} 的回應選項：")
+                for i, response in enumerate(response_dict["responses"], 1):
+                    print(f"{i}. {response}")
+                print("0. 這些選項都不適合（跳過，直接進入下一輪對話）")
+                print("q. 結束對話")
+                print("\n請按數字鍵 0-5 選擇選項，或按 q 結束對話...")
+                
+                while True:
+                    event = keyboard.read_event(suppress=True)
+                    if event.event_type == 'down':
+                        if event.name == '0':
+                            print("\n跳過此輪回應，請繼續對話")
+                            self.conversation_history.append("(跳過此輪回應)")
+                            return ""
+                        elif event.name == 'q':
+                            print("\n結束對話")
+                            return "quit"
+                        elif event.name in ['1', '2', '3', '4', '5']:
+                            choice = int(event.name)
+                            if choice <= len(response_dict["responses"]):
+                                selected_response = response_dict["responses"][choice - 1]
+                                print(f"\n已選擇選項 {choice}: {selected_response}")
+                                self.conversation_history.append(f"{self.character.name}: {selected_response}")
+                                return selected_response
+            else:
+                # 返回 JSON 格式的回應供 GUI 使用
+                return cleaned_response
             
         except json.JSONDecodeError as e:
-            print(f"JSON解析錯誤: {e}")  # 用於調試
             self.current_state = DialogueState.CONFUSED
-            error_response = "對不起，我現在有點混亂，能請你重複一次嗎？"
-            self.conversation_history.append(f"{self.character.name}: {error_response}")
-            return f"{error_response}\n當前對話狀態: {self.current_state.value}"
+            error_response = {
+                "responses": ["對不起，我現在有點混亂，能請你重複一次嗎？"],
+                "state": self.current_state.value
+            }
+            return json.dumps(error_response) if not self.use_terminal else "對不起，我現在有點混亂，能請你重複一次嗎？"
             
         except Exception as e:
-            print(f"其他錯誤: {e}")  # 用於調試
             self.current_state = DialogueState.CONFUSED
-            error_response = "抱歉，我現在無法正確回應"
-            self.conversation_history.append(f"{self.character.name}: {error_response}")
-            return f"{error_response}\n當前對話狀態: {self.current_state.value}"
+            error_response = {
+                "responses": ["抱歉，我現在無法正確回應"],
+                "state": self.current_state.value
+            }
+            return json.dumps(error_response) if not self.use_terminal else "抱歉，我現在無法正確回應"
