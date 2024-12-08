@@ -92,7 +92,11 @@ class DialogueManager:
                 if event.event_type == 'down':
                     if event.name == '0':
                         print("\n跳過此輪回應，請繼續對話")
+                        self.conversation_history.append("(跳過此輪回應)")
                         return ""  # 返回空字串，表示跳過此輪
+                    elif event.name == 'q':
+                        print("\n結束對話")
+                        return "quit"
                     elif event.name in ['1', '2', '3', '4', '5']:
                         choice = int(event.name)
                         selected_response = response_dict["responses"][choice - 1]
@@ -100,11 +104,6 @@ class DialogueManager:
                         # 記錄 NPC 回應
                         self.conversation_history.append(f"{self.character.name}: {selected_response}")
                         return f"{selected_response}\n當前對話狀態: {self.current_state.value}"
-            
-            # 記錄 NPC 回應
-            self.conversation_history.append(f"{self.character.name}: {selected_response}")
-            
-            return f"{selected_response}\n當前對話狀態: {self.current_state.value}"
             
         except json.JSONDecodeError as e:
             print(f"JSON解析錯誤: {e}")  # 用於調試

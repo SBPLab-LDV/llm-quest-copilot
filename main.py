@@ -9,24 +9,27 @@ import keyboard
 async def get_user_input(speech_input: Optional[SpeechInput] = None, input_mode: str = 'text') -> str:
     """獲取使用者輸入，支援文字或語音"""
     if input_mode == 'voice' and speech_input:
+        print("\n請按住 space 鍵開始錄音，放開結束錄音...")
+        print("(或輸入 'q' 離開系統)")
+        
         while True:
-            print("\n請按住 space 鍵開始錄音，放開結束錄音...")
-            print("(或輸入 'q' 離開系統)")
-            
             # 檢查是否要退出
-            if keyboard.read_event(suppress=True).name == 'q':
+            event = keyboard.read_event(suppress=True)
+            if event.event_type == 'down' and event.name == 'q':
                 return 'quit'
+            elif event.event_type == 'down' and event.name == 'space':
+                text = speech_input.record_audio(key='space')
+                if text:
+                    print(f"\n護理人員 (語音輸入): {text}")
+                    return text
                 
-            text = speech_input.record_audio(key='space')
-            if text:
-                print(f"\n護理人員 (語音輸入): {text}")
-                return text
-            
-            print("\n語音辨識失敗")
-            choice = input("是否切換到文字輸入？(y/n，預設n): ").lower()
-            if choice == 'y':
-                return input("\n護理人員 (文字輸入): ").strip()
-            print("\n繼續使用語音輸入...")
+                print("\n語音辨識失敗")
+                choice = input("是否切換到文字輸入？(y/n，預設n): ").lower()
+                if choice == 'y':
+                    return input("\n護理人員 (文字輸入): ").strip()
+                print("\n繼續使用語音輸入...")
+                print("\n請按住 space 鍵開始錄音，放開結束錄音...")
+                print("(或輸入 'q' 離開系統)")
     else:
         return input("\n護理人員: ").strip()
 
@@ -85,7 +88,7 @@ async def chat_with_npc():
     print(f"病患背景: {character.persona}")
     print(f"目標: {character.goal}")
     print("\n您現在可以開始對話")
-    print("(輸入 'quit' 或 'exit' 結束對��)")
+    print("(輸入 'quit' 或 'exit' 結束對話)")
     
     # 開始對話循環
     while True:
