@@ -84,16 +84,22 @@ class DialogueManager:
             print("\n請選擇一個回應選項：")
             for i, response in enumerate(response_dict["responses"], 1):
                 print(f"{i}. {response}")
-            print("\n請按數字鍵 1-5 選擇選項...")
+            print("0. 這些選項都不適合（跳過，直接進入下一輪對話）")
+            print("\n請按數字鍵 0-5 選擇選項...")
             
             while True:
                 event = keyboard.read_event(suppress=True)
                 if event.event_type == 'down':
-                    if event.name in ['1', '2', '3', '4', '5']:
+                    if event.name == '0':
+                        print("\n跳過此輪回應，請繼續對話")
+                        return ""  # 返回空字串，表示跳過此輪
+                    elif event.name in ['1', '2', '3', '4', '5']:
                         choice = int(event.name)
                         selected_response = response_dict["responses"][choice - 1]
                         print(f"\n已選擇選項 {choice}")
-                        break
+                        # 記錄 NPC 回應
+                        self.conversation_history.append(f"{self.character.name}: {selected_response}")
+                        return f"{selected_response}\n當前對話狀態: {self.current_state.value}"
             
             # 記錄 NPC 回應
             self.conversation_history.append(f"{self.character.name}: {selected_response}")
