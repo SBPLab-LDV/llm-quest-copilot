@@ -97,7 +97,7 @@ class ChatWindow:
         self.input_field = ttk.Entry(self.input_frame, width=50)
         self.input_field.grid(row=0, column=0, padx=5)
         
-        # 發送按鈕
+        # 發���按鈕
         self.send_button = ttk.Button(
             self.input_frame, text="發送", command=self.send_message)
         self.send_button.grid(row=0, column=1, padx=5)
@@ -186,13 +186,10 @@ class ChatWindow:
         # 顯示選擇的回應或跳過提示
         if response is None:
             self.chat_history.insert(tk.END, "\n(跳過此輪回應)\n")
-            self.chat_history.insert(tk.END, f"[當前狀態: {self.current_state}]\n")
-            self.chat_history.insert(tk.END, "\n請繼續提問...\n")
         else:
             self.chat_history.insert(tk.END, f"\n{self.character.name}: {response}\n")
-            self.chat_history.insert(tk.END, f"[當前狀態: {self.current_state}]\n")
-            self.chat_history.insert(tk.END, "\n請繼續提問...\n")
         
+        self.chat_history.insert(tk.END, "\n請繼續提問...\n")
         self.chat_history.see(tk.END)
         
         # 清除選項按鈕
@@ -221,6 +218,16 @@ class ChatWindow:
         # 非同步處理回應
         async def handle_response():
             response = await self.process_message(message)
+            try:
+                # 解析回應 JSON 並顯示狀態
+                response_data = json.loads(response)
+                state = response_data.get("state", "NORMAL")
+                self.chat_history.insert(tk.END, f"\n[當前狀態: {state}]\n")
+                self.chat_history.see(tk.END)
+            except json.JSONDecodeError:
+                pass
+            
+            # 顯示選項按鈕
             self.root.after(0, self.display_response_options, response)
         
         asyncio.run(handle_response())
