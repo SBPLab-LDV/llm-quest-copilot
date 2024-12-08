@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional, Tuple
 
 class SpeechInput:
-    def __init__(self, google_api_key: str):
+    def __init__(self, google_api_key: str, save_recordings: bool = False, debug_mode: bool = False):
         self.recognizer = sr.Recognizer()
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = google_api_key
         self.recording = False
@@ -18,11 +18,13 @@ class SpeechInput:
         self.frames = []
         self.sample_rate = 16000
         self.chunk = 1024
-        self.debug_mode = False  # 開啟除錯模式
+        self.debug_mode = debug_mode
+        self.save_recordings = save_recordings
         
-        # 確保recordings目錄存在
-        self.recordings_dir = 'recordings'
-        os.makedirs(self.recordings_dir, exist_ok=True)
+        # 只在需要保存錄音時創建目錄
+        if self.save_recordings:
+            self.recordings_dir = 'recordings'
+            os.makedirs(self.recordings_dir, exist_ok=True)
 
     def debug_print(self, message: str):
         """除錯訊息輸出"""
@@ -143,19 +145,23 @@ class SpeechInput:
                 print(f"音訊格式轉換失敗: {e}")
                 return None
 
-            # 儲存錄音
-            saved_file = self.save_recording(converted_audio)
-            print(f"錄音已儲存至: {saved_file}")
-            
-            try:
-                # 使用 WAV 檔案進行辨識
+            # 只在需要時保存錄音
+            if self.save_recordings:
+                saved_file = self.save_recording(converted_audio)
+                print(f"錄音已儲存至: {saved_file}")
+                # 使用保存的檔案進行辨識
                 with sr.AudioFile(saved_file) as source:
                     audio = self.recognizer.record(source)
-                    self.debug_print("Successfully loaded audio file for recognition")
-                    
-                    # 使用 Google Speech Recognition
-                    text = self.recognizer.recognize_google(audio, language='zh-TW')
-                    return text
+            else:
+                # 直接使用轉換後的音訊數據進行辨識
+                audio = sr.AudioData(converted_audio, self.sample_rate, 2)
+            
+            self.debug_print("Successfully prepared audio for recognition")
+            
+            try:
+                # 使用 Google Speech Recognition
+                text = self.recognizer.recognize_google(audio, language='zh-TW')
+                return text
             except sr.UnknownValueError:
                 print("無法辨識語音內容，請說話更清晰")
                 self.debug_print("Speech recognition failed to understand the audio")

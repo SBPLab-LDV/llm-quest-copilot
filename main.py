@@ -42,7 +42,13 @@ async def chat_with_npc():
     # 如果使用語音輸入，初始化語音輸入模組
     speech_input = None
     if input_mode == 'voice':
-        speech_input = SpeechInput(config['google_api_key'])
+        save_recordings = config.get('save_recordings', False)
+        debug_mode = config.get('debug_mode', False)
+        speech_input = SpeechInput(
+            config['google_api_key'],
+            save_recordings=save_recordings,
+            debug_mode=debug_mode
+        )
 
     # 顯示可用角色列表
     characters = list_available_characters()
@@ -79,7 +85,7 @@ async def chat_with_npc():
     print(f"病患背景: {character.persona}")
     print(f"目標: {character.goal}")
     print("\n您現在可以開始對話")
-    print("(輸入 'quit' 或 'exit' 結束對話)")
+    print("(輸入 'quit' 或 'exit' 結束對��)")
     
     # 開始對話循環
     while True:
