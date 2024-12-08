@@ -1,15 +1,30 @@
 import tkinter as tk
 from tkinter import ttk, scrolledtext
 import asyncio
-from ..core.dialogue import DialogueManager
-from ..utils.config import load_character, list_available_characters
+import threading
 import json
+from ..core.dialogue import DialogueManager
+from ..utils.config import load_character, list_available_characters, load_config
+from ..utils.speech_input import SpeechInput
 
 class ChatWindow:
     def __init__(self, root):
         self.root = root
         self.root.title("口腔癌病患對話系統")
-        self.root.geometry("800x800")
+        self.root.geometry("800x600")
+        
+        # 載入設定
+        self.config = load_config()
+        
+        # 初始化語音輸入
+        if self.config.get('input_mode') == 'voice':
+            self.speech_input = SpeechInput(
+                self.config['google_api_key'],
+                save_recordings=self.config.get('save_recordings', False),
+                debug_mode=self.config.get('debug_mode', False)
+            )
+        else:
+            self.speech_input = None
         
         # 建立主要框架
         self.main_frame = ttk.Frame(root, padding="10")
@@ -22,21 +37,16 @@ class ChatWindow:
         self.chat_frame = ttk.Frame(self.main_frame)
         self.setup_chat_area()
         
-        # 初始化對話管理器和對話歷史
+        # 初始化對話管理器
         self.dialogue_manager = None
         self.character = None
-        self.conversation_history = []
         
-        # 選項按鈕列表
-        self.option_buttons = []
+        # 錄音狀態
+        self.is_recording = False
+        self.recording_thread = None
         
-        # 配置根窗口的網格權重
-        root.grid_rowconfigure(0, weight=1)
-        root.grid_columnconfigure(0, weight=1)
-        
-        # 配置主框架的網格權重
-        self.main_frame.grid_rowconfigure(0, weight=1)
-        self.main_frame.grid_columnconfigure(0, weight=1)
+        # 回應選項按鈕
+        self.response_buttons = []
 
     def setup_character_selection(self):
         """設置病患選擇介面"""
@@ -78,30 +88,45 @@ class ChatWindow:
         # 對話歷史顯示區
         self.chat_history = scrolledtext.ScrolledText(
             self.chat_frame, wrap=tk.WORD, width=70, height=20)
-        self.chat_history.grid(row=0, column=0, columnspan=3, padx=5, pady=5, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.chat_history.grid(row=0, column=0, columnspan=2, padx=5, pady=5)
         
-        # 選項區域（在對話歷史下方）
-        self.options_frame = ttk.Frame(self.chat_frame)
-        self.options_frame.grid(row=1, column=0, columnspan=3, padx=5, pady=5, sticky=(tk.W, tk.E))
-        
-        # 輸入區域（在選項區域下方）
+        # 輸入區域
         self.input_frame = ttk.Frame(self.chat_frame)
-        self.input_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), padx=5, pady=5)
+        self.input_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E))
         
         self.input_field = ttk.Entry(self.input_frame, width=50)
-        self.input_field.grid(row=0, column=0, padx=5, sticky=(tk.W, tk.E))
+        self.input_field.grid(row=0, column=0, padx=5)
         
+        # 發���按鈕
         self.send_button = ttk.Button(
             self.input_frame, text="發送", command=self.send_message)
         self.send_button.grid(row=0, column=1, padx=5)
         
+        # 語音輸入按鈕
+        if self.speech_input:
+            self.voice_button = ttk.Button(
+                self.input_frame, 
+                text="按住說話", 
+                command=lambda: None)
+            self.voice_button.grid(row=0, column=2, padx=5)
+            
+            # 綁定按鈕事件
+            self.voice_button.bind('<ButtonPress-1>', self.start_recording)
+            self.voice_button.bind('<ButtonRelease-1>', self.stop_recording)
+            
+            # 錄音狀態標籤
+            self.recording_label = ttk.Label(
+                self.input_frame, 
+                text="", 
+                foreground="red")
+            self.recording_label.grid(row=0, column=3, padx=5)
+        
+        # 回應選項區域
+        self.response_frame = ttk.Frame(self.chat_frame)
+        self.response_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E))
+        
         # 綁定 Enter 鍵
         self.input_field.bind("<Return>", lambda e: self.send_message())
-        
-        # 配置網格權重
-        self.chat_frame.grid_rowconfigure(0, weight=3)  # 對話歷史佔較多空間
-        self.chat_frame.grid_rowconfigure(1, weight=1)  # 選項區域佔較少空間
-        self.chat_frame.grid_columnconfigure(0, weight=1)
 
     def select_character(self, char_id):
         """選擇病患"""
@@ -118,111 +143,64 @@ class ChatWindow:
                       f"目標: {self.character.goal}\n\n")
         self.chat_history.insert(tk.END, welcome_msg)
 
+    def display_response_options(self, response_json):
+        """顯示回應選項按鈕"""
+        # 清除現有按鈕
+        for button in self.response_buttons:
+            button.destroy()
+        self.response_buttons.clear()
+        
+        try:
+            # 解析回應 JSON
+            response_data = json.loads(response_json)
+            responses = response_data.get("responses", [])
+            
+            # 創建新按鈕
+            for i, response in enumerate(responses):
+                button = ttk.Button(
+                    self.response_frame,
+                    text=f"{i+1}. {response}",
+                    command=lambda r=response: self.select_response(r)
+                )
+                button.grid(row=i//2, column=i%2, padx=5, pady=2, sticky=(tk.W, tk.E))
+                self.response_buttons.append(button)
+            
+            # 添加"跳過"選項按鈕
+            skip_button = ttk.Button(
+                self.response_frame,
+                text="0. 這些選項都不適合（跳過，請繼續提問）",
+                command=lambda: self.select_response(None)
+            )
+            skip_button.grid(row=(len(responses)+1)//2, column=0, columnspan=2, 
+                           padx=5, pady=2, sticky=(tk.W, tk.E))
+            self.response_buttons.append(skip_button)
+                
+        except json.JSONDecodeError:
+            # 如果不是 JSON 格式，直接顯示文本
+            self.chat_history.insert(tk.END, f"\n{self.character.name}: {response_json}\n")
+            self.chat_history.see(tk.END)
+
+    def select_response(self, response):
+        """選擇回應選項"""
+        # 顯示選擇的回應或跳過提示
+        if response is None:
+            self.chat_history.insert(tk.END, "\n(跳過此輪回應)\n")
+            self.chat_history.insert(tk.END, "\n請繼續提問...\n")
+        else:
+            self.chat_history.insert(tk.END, f"\n{self.character.name}: {response}\n")
+            self.chat_history.insert(tk.END, "\n請繼續提問...\n")
+        
+        self.chat_history.see(tk.END)
+        
+        # 清除選項按鈕
+        for button in self.response_buttons:
+            button.destroy()
+        self.response_buttons.clear()
+
     async def process_message(self, message):
         """處理訊息"""
         response = await self.dialogue_manager.process_turn(message)
         return response
-
-    def handle_response_display(self, response):
-        """處理回應顯示和選項"""
-        try:
-            # 清除現有選項
-            self.clear_options()
-            
-            # 嘗試解析 JSON 回應
-            response_dict = json.loads(response)
-            
-            # 顯示回應文字
-            if isinstance(response_dict.get("responses", []), list):
-                responses = response_dict["responses"]
-                if responses:
-                    # 只顯示選項按鈕，不在對話框中顯示選項列表
-                    self.display_options(responses)
-            else:
-                response_text = response_dict.get("responses", "無回應")
-                self.chat_history.insert(tk.END, f"\n{self.character.name}: {response_text}\n")
-                
-            # 顯示狀態
-            if "state" in response_dict:
-                self.chat_history.insert(tk.END, f"[當前狀態: {response_dict['state']}]\n")
-                
-        except json.JSONDecodeError:
-            # 如果不是 JSON 格式，直接顯示文字
-            self.chat_history.insert(tk.END, f"\n{self.character.name}: {response}\n")
-        
-        self.chat_history.see(tk.END)
-
-    def display_options(self, options):
-        """顯示選項按鈕"""
-        # 清除現有選項
-        self.clear_options()
-        
-        # 計算每行顯示的按鈕數
-        buttons_per_row = 2
-        
-        # 創建並顯示選項按鈕
-        for i, option in enumerate(options):
-            btn = ttk.Button(
-                self.options_frame,
-                text=f"{i+1}. {option}",
-                command=lambda opt=option, num=i+1: self.select_option(opt, num),
-                width=40  # 設定按鈕寬度
-            )
-            row = i // buttons_per_row
-            col = i % buttons_per_row
-            btn.grid(row=row, column=col, padx=5, pady=2, sticky='ew')
-            self.option_buttons.append(btn)
-        
-        # 添加跳過選項按鈕
-        skip_btn = ttk.Button(
-            self.options_frame,
-            text="0. 跳過選項",
-            command=lambda: self.select_option(None, 0),
-            width=20
-        )
-        skip_btn.grid(
-            row=(len(options) + buttons_per_row - 1) // buttons_per_row,
-            column=0,
-            columnspan=2,
-            pady=5,
-            sticky='ew'
-        )
-        self.option_buttons.append(skip_btn)
-        
-        # 配置列的權重
-        for i in range(buttons_per_row):
-            self.options_frame.grid_columnconfigure(i, weight=1)
-
-    def select_option(self, option, number):
-        """選擇一個選項"""
-        if option is not None:
-            # 顯示選擇的選項作為病患的回答
-            self.chat_history.insert(tk.END, f"\n{self.character.name}: {option}\n")
-            self.chat_history.see(tk.END)
-            
-            # 記錄到對話歷史
-            self.conversation_history.append(f"{self.character.name}: {option}")
-            
-            # 禁用所有選項按鈕
-            for btn in self.option_buttons:
-                btn.configure(state='disabled')
-                
-            # 添加提示，讓護理人員知道換他輸入了
-            self.chat_history.insert(tk.END, "\n=== 請護理人員繼續提問 ===\n")
-            self.chat_history.see(tk.END)
-            
-            # 聚焦到輸入框
-            self.input_field.focus_set()
-        else:
-            # 跳過選項
-            self.chat_history.insert(tk.END, "\n[跳過此輪回應]\n")
-            self.chat_history.insert(tk.END, "\n=== 請護理人員繼續提問 ===\n")
-            self.chat_history.see(tk.END)
-            # 禁用所有選項按鈕
-            for btn in self.option_buttons:
-                btn.configure(state='disabled')
-            # 聚焦到輸入框
-            self.input_field.focus_set()
 
     def send_message(self):
         """發送訊息"""
@@ -233,43 +211,52 @@ class ChatWindow:
         # 清空輸入框
         self.input_field.delete(0, tk.END)
         
-        # 禁用輸入區域
-        self.disable_input()
-        
         # 顯示護理人員訊息
         self.chat_history.insert(tk.END, f"\n護理人員: {message}\n")
         self.chat_history.see(tk.END)
         
         # 非同步處理回應
         async def handle_response():
-            try:
-                response = await self.process_message(message)
-                self.root.after(0, self.handle_response_display, response)
-            except Exception as e:
-                self.root.after(0, self.display_error, str(e))
-            finally:
-                self.root.after(0, self.enable_input)
+            response = await self.process_message(message)
+            self.root.after(0, self.display_response_options, response)
         
-        # 使用 asyncio 執行非同步任務
         asyncio.run(handle_response())
 
-    def display_error(self, error):
-        """顯示錯誤訊息"""
-        self.chat_history.insert(tk.END, f"\n發生錯誤: {error}\n")
-        self.chat_history.see(tk.END)
+    def start_recording(self, event):
+        """開始錄音"""
+        if not self.is_recording and self.speech_input:
+            self.is_recording = True
+            self.recording_label.config(text="正在錄音...")
+            self.voice_button.config(text="放開結束")
+            
+            # 在新線程中開始錄音
+            self.recording_thread = threading.Thread(
+                target=self.speech_input.start_recording
+            )
+            self.recording_thread.start()
 
-    def clear_options(self):
-        """清除選項按鈕"""
-        for btn in self.option_buttons:
-            btn.destroy()
-        self.option_buttons = []
-
-    def disable_input(self):
-        """禁用輸入區域"""
-        self.input_field.config(state=tk.DISABLED)
-        self.send_button.config(state=tk.DISABLED)
-
-    def enable_input(self):
-        """啟用輸入區域"""
-        self.input_field.config(state=tk.NORMAL)
-        self.send_button.config(state=tk.NORMAL) 
+    def stop_recording(self, event):
+        """停止錄音並處理語音"""
+        if self.is_recording and self.speech_input:
+            self.is_recording = False
+            self.recording_label.config(text="處理中...")
+            self.voice_button.config(text="按住說話")
+            
+            # 停止錄音並獲取文字
+            def process_recording():
+                text = self.speech_input.stop_recording()
+                if text:
+                    # 使用 after 方法在主線程中更新 UI
+                    self.root.after(0, self.handle_voice_result, text)
+                else:
+                    self.root.after(0, self.recording_label.config, {"text": ""})
+            
+            # 在新線程中處理錄音結果
+            threading.Thread(target=process_recording).start()
+    
+    def handle_voice_result(self, text):
+        """處理語音識別結果"""
+        self.input_field.delete(0, tk.END)
+        self.input_field.insert(0, text)
+        self.send_message()
+        self.recording_label.config(text="")
