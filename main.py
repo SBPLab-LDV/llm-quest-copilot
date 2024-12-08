@@ -4,11 +4,19 @@ from src.utils.config import load_character, list_available_characters, load_con
 from src.utils.logger import setup_logger
 from src.utils.speech_input import SpeechInput
 from typing import Optional
+import keyboard
 
 async def get_user_input(speech_input: Optional[SpeechInput] = None, input_mode: str = 'text') -> str:
     """獲取使用者輸入，支援文字或語音"""
     if input_mode == 'voice' and speech_input:
         while True:
+            print("\n請按住 space 鍵開始錄音，放開結束錄音...")
+            print("(或輸入 'q' 離開系統)")
+            
+            # 檢查是否要退出
+            if keyboard.read_event(suppress=True).name == 'q':
+                return 'quit'
+                
             text = speech_input.record_audio(key='space')
             if text:
                 print(f"\n護理人員 (語音輸入): {text}")
@@ -19,7 +27,6 @@ async def get_user_input(speech_input: Optional[SpeechInput] = None, input_mode:
             if choice == 'y':
                 return input("\n護理人員 (文字輸入): ").strip()
             print("\n繼續使用語音輸入...")
-            # 如果選擇 n 或直接按 Enter，會繼續循環使用語音輸入
     else:
         return input("\n護理人員: ").strip()
 

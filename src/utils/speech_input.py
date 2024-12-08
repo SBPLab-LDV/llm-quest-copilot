@@ -18,7 +18,7 @@ class SpeechInput:
         self.frames = []
         self.sample_rate = 16000
         self.chunk = 1024
-        self.debug_mode = True  # 開啟除錯模式
+        self.debug_mode = False  # 開啟除錯模式
         
         # 確保recordings目錄存在
         self.recordings_dir = 'recordings'
@@ -99,8 +99,6 @@ class SpeechInput:
             
             self.frames = []
             self.recording = False
-            
-            print(f"\n請按住 {key} 鍵開始錄音，放開結束錄音...")
             
             # 等待按下按鍵
             keyboard.wait(key, trigger_on_release=False)
