@@ -8,8 +8,17 @@ def load_config() -> Dict[str, Any]:
     try:
         with open('config/config.yaml', 'r', encoding='utf-8') as file:
             config = yaml.safe_load(file)
+            # 設定預設值
+            if 'input_mode' not in config:
+                config['input_mode'] = 'text'
+            if 'voice_input_duration' not in config:
+                config['voice_input_duration'] = 5
     except FileNotFoundError:
-        config = {'google_api_key': os.getenv('GOOGLE_API_KEY')}
+        config = {
+            'google_api_key': os.getenv('GOOGLE_API_KEY'),
+            'input_mode': 'text',
+            'voice_input_duration': 5
+        }
         if not config['google_api_key']:
             raise ValueError("找不到 Google API Key")
     return config

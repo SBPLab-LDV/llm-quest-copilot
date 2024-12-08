@@ -1,12 +1,41 @@
 import asyncio
 from src.core.dialogue import DialogueManager
-from src.utils.config import load_character, list_available_characters
+from src.utils.config import load_character, list_available_characters, load_config
 from src.utils.logger import setup_logger
+from src.utils.speech_input import SpeechInput
+from typing import Optional
+
+async def get_user_input(speech_input: Optional[SpeechInput] = None, input_mode: str = 'text') -> str:
+    """獲取使用者輸入，支援文字或語音"""
+    if input_mode == 'voice' and speech_input:
+        while True:
+            text = speech_input.record_audio(key='space')
+            if text:
+                print(f"\n護理人員 (語音輸入): {text}")
+                return text
+            
+            print("\n語音辨識失敗")
+            choice = input("是否切換到文字輸入？(y/n，預設n): ").lower()
+            if choice == 'y':
+                return input("\n護理人員 (文字輸入): ").strip()
+            print("\n繼續使用語音輸入...")
+            # 如果選擇 n 或直接按 Enter，會繼續循環使用語音輸入
+    else:
+        return input("\n護理人員: ").strip()
 
 async def chat_with_npc():
     # 設定日誌
     logger = setup_logger('npc_chat')
     logger.info("開始NPC對話系統")
+
+    # 載入設定
+    config = load_config()
+    input_mode = config['input_mode']
+    
+    # 如果使用語音輸入，初始化語音輸入模組
+    speech_input = None
+    if input_mode == 'voice':
+        speech_input = SpeechInput(config['google_api_key'])
 
     # 顯示可用角色列表
     characters = list_available_characters()
@@ -49,7 +78,7 @@ async def chat_with_npc():
     while True:
         try:
             # 獲取用戶輸入
-            user_input = input("\n護理人員: ").strip()
+            user_input = await get_user_input(speech_input, input_mode)
             
             # 檢查是否要結束對話
             if user_input.lower() in ['quit', 'exit']:
