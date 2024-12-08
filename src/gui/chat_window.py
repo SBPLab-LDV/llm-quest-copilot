@@ -97,7 +97,7 @@ class ChatWindow:
         self.input_field = ttk.Entry(self.input_frame, width=50)
         self.input_field.grid(row=0, column=0, padx=5)
         
-        # 發���按鈕
+        # 發送按鈕
         self.send_button = ttk.Button(
             self.input_frame, text="發送", command=self.send_message)
         self.send_button.grid(row=0, column=1, padx=5)
@@ -154,6 +154,7 @@ class ChatWindow:
             # 解析回應 JSON
             response_data = json.loads(response_json)
             responses = response_data.get("responses", [])
+            self.current_state = response_data.get("state", "NORMAL")  # 保存當前狀態
             
             # 創建新按鈕
             for i, response in enumerate(responses):
@@ -185,9 +186,11 @@ class ChatWindow:
         # 顯示選擇的回應或跳過提示
         if response is None:
             self.chat_history.insert(tk.END, "\n(跳過此輪回應)\n")
+            self.chat_history.insert(tk.END, f"[當前狀態: {self.current_state}]\n")
             self.chat_history.insert(tk.END, "\n請繼續提問...\n")
         else:
             self.chat_history.insert(tk.END, f"\n{self.character.name}: {response}\n")
+            self.chat_history.insert(tk.END, f"[當前狀態: {self.current_state}]\n")
             self.chat_history.insert(tk.END, "\n請繼續提問...\n")
         
         self.chat_history.see(tk.END)
