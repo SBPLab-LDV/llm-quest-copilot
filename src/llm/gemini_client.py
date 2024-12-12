@@ -5,7 +5,7 @@ class GeminiClient:
     def __init__(self):
         config = load_config()
         genai.configure(api_key=config['google_api_key'])
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
 
     def generate_response(self, prompt: str) -> str:
         """生成回應並確保格式正確"""
