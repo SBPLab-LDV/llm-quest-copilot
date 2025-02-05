@@ -5,24 +5,41 @@ import re
 from .character import Character
 from .state import DialogueState
 from ..llm.gemini_client import GeminiClient
-from ..utils.config import load_prompts
+from .prompt_manager import PromptManager
 import keyboard
 
 class DialogueManager:
     def __init__(self, character: Character, use_terminal: bool = False):
+        """Initialize the DialogueManager.
+        
+        Args:
+            character: Character instance containing the NPC's information
+            use_terminal: Whether to use terminal mode for interaction
+        """
         self.character = character
         self.current_state = DialogueState.NORMAL
         self.conversation_history = []
         self.gemini_client = GeminiClient()
-        self.prompts = load_prompts()
+        self.prompt_manager = PromptManager()
         self.use_terminal = use_terminal
 
-    def _format_conversation_history(self) -> str:
-        """格式化對話歷史"""
-        return "\n".join(self.conversation_history[-5:])  # 只保留最近5輪對話
+    def _format_conversation_history(self) -> List[str]:
+        """Format the conversation history.
+        
+        Returns:
+            List of the last 5 conversation turns
+        """
+        return self.conversation_history[-5:]  # 只保留最近5輪對話
     
     def _clean_json_string(self, text: str) -> str:
-        """清理並格式化JSON字串"""
+        """Clean and format JSON string.
+        
+        Args:
+            text: Raw JSON string to clean
+            
+        Returns:
+            Cleaned JSON string
+        """
         # 移除可能的前導和尾隨非JSON內容
         text = text.strip()
         start_idx = text.find('{')
@@ -38,20 +55,27 @@ class DialogueManager:
         return text
 
     async def process_turn(self, user_input: str) -> Union[str, dict]:
-        """處理一輪對話"""
+        """Process one turn of dialogue.
+        
+        Args:
+            user_input: The user's input text
+            
+        Returns:
+            Either a string response (terminal mode) or JSON response (GUI mode)
+        """
         try:
             # 記錄用戶輸入
             self.conversation_history.append(f"護理人員: {user_input}")
             
-            # 準備提示詞
-            prompt = self.prompts['character_response'].format(
-                name=self.character.name,
+            # 使用 PromptManager 生成提示詞
+            prompt = self.prompt_manager.generate_prompt(
+                user_input=user_input,
+                character_name=self.character.name,
                 persona=self.character.persona,
                 backstory=self.character.backstory,
                 goal=self.character.goal,
                 current_state=self.current_state.value,
-                conversation_history=self._format_conversation_history(),
-                user_input=user_input
+                conversation_history=self._format_conversation_history()
             )
 
             # 獲取回應
@@ -77,6 +101,14 @@ class DialogueManager:
                 self.current_state = DialogueState(new_state)
             except ValueError:
                 self.current_state = DialogueState.CONFUSED
+
+            # 評估回應品質
+            evaluation_prompt = self.prompt_manager.get_evaluation_prompt(
+                current_state=self.current_state.value,
+                player_input=user_input,
+                response=cleaned_response
+            )
+            # TODO: 使用評估結果來改進回應品質
 
             if self.use_terminal:
                 # 在終端機中處理選項
