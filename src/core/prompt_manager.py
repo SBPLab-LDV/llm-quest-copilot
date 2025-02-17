@@ -1,6 +1,7 @@
 import os
 import yaml
 from typing import Dict, List, Optional
+from .character import Character
 
 class PromptManager:
     def __init__(self, prompts_dir: str = "prompts"):
@@ -55,20 +56,14 @@ class PromptManager:
 
     def generate_prompt(self,
                        user_input: str,
-                       character_name: str,
-                       persona: str,
-                       backstory: str,
-                       goal: str,
+                       character: Character,
                        current_state: str,
                        conversation_history: Optional[List[str]] = None) -> str:
         """Generate a complete prompt by combining templates and context-specific examples.
         
         Args:
             user_input: The user's input text
-            character_name: The character's name
-            persona: The character's personality description
-            backstory: The character's background story
-            goal: The character's goal
+            character: Character object containing character information
             current_state: Current dialogue state
             conversation_history: Optional list of previous conversation turns
             
@@ -91,21 +86,25 @@ class PromptManager:
         # Get base template
         template = self.templates["character_response"]
 
+        fixed_settings_yaml = yaml.dump(character.details.get('fixed_settings', {}), allow_unicode=True)
+        floating_settings_yaml = yaml.dump(character.details.get('floating_settings', {}), allow_unicode=True)
+
         prompt = template.format(
-            name=character_name,
-            persona=persona,
-            backstory=backstory,
-            goal=goal,
+            name=character.name,
+            persona=character.persona,
+            backstory=character.backstory,
+            goal=character.goal,
             current_state=current_state,
             dialogue_contexts=yaml.dump(self.context_keywords["dialogue_contexts"],
                                        allow_unicode=True),
-            # dialogue_context parameter is intentionally removed.
             context_examples=examples_text,
             conversation_history="\n".join(conversation_history) if conversation_history else "",
-            user_input=user_input
+            user_input=user_input,
+            fixed_settings=fixed_settings_yaml,
+            floating_settings=floating_settings_yaml
         )
 
-        print(prompt)
+        # print(prompt)
         
         return prompt
 

@@ -38,14 +38,11 @@ def load_character(character_id: str) -> Character:
             data = yaml.safe_load(file)
             if character_id not in data['characters']:
                 raise ValueError(f"找不到角色 ID: {character_id}")
-            
+
             char_data = data['characters'][character_id]
-            return Character(
-                name=char_data['name'],
-                persona=char_data['persona'],
-                backstory=char_data['backstory'],
-                goal=char_data['goal']
-            )
+            # 使用 Character.from_yaml class method 來建立 Character 物件
+            return Character.from_yaml(char_data)
+
     except FileNotFoundError:
         raise FileNotFoundError("找不到角色設定檔")
 
