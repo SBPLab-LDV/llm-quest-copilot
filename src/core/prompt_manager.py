@@ -38,26 +38,6 @@ class PromptManager:
         with open(keywords_path, 'r', encoding='utf-8') as f:
             self.context_keywords = yaml.safe_load(f)
 
-    def detect_context(self, user_input: str) -> str:
-        """Detect the most likely context based on user input and keywords.
-        
-        Args:
-            user_input: The user's input text
-            
-        Returns:
-            The detected context (e.g., "醫師查房", "病房日常", etc.)
-        """
-        max_matches = 0
-        detected_context = "一般對話"  # default context
-
-        for context, keywords in self.context_keywords["dialogue_contexts"].items():
-            matches = sum(1 for keyword in keywords if keyword in user_input)
-            if matches > max_matches:
-                max_matches = matches
-                detected_context = context
-
-        return detected_context
-
     def get_examples_for_context(self, context: str) -> List[Dict]:
         """Get relevant examples for a given context.
         
@@ -73,7 +53,7 @@ class PromptManager:
                     return entry["examples"]
         return []
 
-    def generate_prompt(self, 
+    def generate_prompt(self,
                        user_input: str,
                        character_name: str,
                        persona: str,
@@ -93,13 +73,10 @@ class PromptManager:
             conversation_history: Optional list of previous conversation turns
             
         Returns:
-            Complete prompt string
+            Complete prompt string with variables replaced.
         """
-        # Detect context
-        context = self.detect_context(user_input)
-        
         # Get relevant examples
-        examples = self.get_examples_for_context(context)
+        examples = self.get_examples_for_context(current_state)
         
         # Format examples as text
         examples_text = ""
@@ -113,21 +90,22 @@ class PromptManager:
 
         # Get base template
         template = self.templates["character_response"]
-        
-        # Replace variables
+
         prompt = template.format(
             name=character_name,
             persona=persona,
             backstory=backstory,
             goal=goal,
             current_state=current_state,
-            dialogue_context=context,
-            dialogue_contexts=yaml.dump(self.context_keywords["dialogue_contexts"], 
-                                      allow_unicode=True),
+            dialogue_contexts=yaml.dump(self.context_keywords["dialogue_contexts"],
+                                       allow_unicode=True),
+            # dialogue_context parameter is intentionally removed.
             context_examples=examples_text,
             conversation_history="\n".join(conversation_history) if conversation_history else "",
             user_input=user_input
         )
+
+        print(prompt)
         
         return prompt
 

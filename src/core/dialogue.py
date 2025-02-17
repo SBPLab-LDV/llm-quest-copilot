@@ -80,6 +80,7 @@ class DialogueManager:
 
             # 獲取回應
             response = self.gemini_client.generate_response(prompt)
+            print(response)
             
             # 清理並解析JSON
             cleaned_response = self._clean_json_string(response)
@@ -89,7 +90,7 @@ class DialogueManager:
             if not isinstance(response_dict, dict):
                 raise ValueError("回應格式錯誤：不是有效的JSON物件")
             
-            if "responses" not in response_dict or "state" not in response_dict:
+            if "responses" not in response_dict or "state" not in response_dict or "dialogue_context" not in response_dict:
                 raise ValueError("回應格式錯誤：缺少必要的欄位")
             
             if not isinstance(response_dict["responses"], list):
@@ -101,6 +102,10 @@ class DialogueManager:
                 self.current_state = DialogueState(new_state)
             except ValueError:
                 self.current_state = DialogueState.CONFUSED
+
+            # 取得對話情境
+            dialogue_context = response_dict["dialogue_context"]
+            print(f"LLM 判斷的對話情境: {dialogue_context}")
 
             # 評估回應品質
             evaluation_prompt = self.prompt_manager.get_evaluation_prompt(
