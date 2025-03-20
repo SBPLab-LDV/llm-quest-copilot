@@ -30,6 +30,52 @@ llm-quest-copilot/
 └── logs/                    # 日誌檔案
 ```
 
+## 使用 Docker 運行
+
+### Docker 安裝
+確保您的系統已安裝 Docker。如果尚未安裝，請參考 [Docker 官方文檔](https://docs.docker.com/get-docker/) 進行安裝。
+
+### 使用 Docker 運行服務
+
+1. 構建 Docker 映像：
+```bash
+docker build -t llm-quest-copilot .
+```
+
+2. 運行容器（自動重啟模式）：
+```bash
+docker run -d --restart=always -p 8000:8000 llm-quest-copilot
+```
+
+重啟策略說明：
+- `--restart=always`：容器退出時自動重啟
+- `-d`：在背景運行容器
+- `-p 8000:8000`：將容器的 8000 端口映射到主機的 8000 端口
+
+3. 查看容器日誌：
+```bash
+docker logs -f <container_id>
+```
+
+4. 在容器內執行測試：
+```bash
+# 進入容器
+docker exec -it <container_id> bash
+
+# 執行測試
+python run_tests.py
+```
+
+### Docker 常用命令
+
+- 停止容器：`docker stop <container_id>`
+- 啟動容器：`docker start <container_id>`
+- 重啟容器：`docker restart <container_id>`
+- 查看運行中的容器：`docker ps`
+- 查看所有容器：`docker ps -a`
+- 刪除容器：`docker rm <container_id>`
+- 刪除映像：`docker rmi llm-quest-copilot`
+
 ## 安裝步驟
 
 1. 克隆專案：
