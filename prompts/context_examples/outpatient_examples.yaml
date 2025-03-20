@@ -1,0 +1,67 @@
+outpatient_examples:
+  - context: 門診醫師問診
+    examples:
+      - question: 最近還好嗎？
+        keyword: 心理
+        responses:
+          - 打化療很累、不舒服。
+          - 還不錯。
+          - 沒什麼特別的。
+          - 說不上來的不舒服。
+          - 一天比一天好了。
+
+      - question: 心情還好嗎？
+        keyword: 心理；情緒
+        responses:
+          - 有點鬱卒。
+          - 很好！
+          - 還可以。
+          - 很煩躁。
+          - 擔心治療的效果。
+
+      - question: 有沒有需要什麼藥？
+        keyword: 藥物；需求
+        responses:
+          - 藥膏。
+          - 止痛藥。
+          - 安眠藥。
+          - 止吐藥。
+          - 目前的藥還夠。
+
+      - question: 化療做完了嗎？
+        keyword: 化放療
+        responses:
+          - 還在打。
+          - 快結束了。
+          - 療程都打完了。
+          - 下週要開始新的療程。
+          - 因為身體狀況暫停了。
+
+  - context: 門診護理詢問
+    examples:
+      - question: 最近有發燒、感冒的症狀嗎？
+        keyword: 不適；體溫
+        responses:
+          - 沒有。
+          - 有發燒。
+          - 流鼻水。
+          - 喉嚨痛。
+          - 有點咳嗽。
+
+      - question: 還有在抽菸嗎？
+        keyword: 不良習慣；抽菸
+        responses:
+          - 都沒有。
+          - 偶爾。
+          - 有減少。
+          - 還是有抽
+          - 戒了
+
+      - question: 下一次回診的時間有預約了嗎？
+        keyword: 門診
+        responses:
+          - 還沒有，你能幫我預約嗎？
+          - 不知道，可能要問我家人/看護/外傭
+          - 有，已經預約好了
+          - 想改時間可以嗎？
+          - 下週二早上

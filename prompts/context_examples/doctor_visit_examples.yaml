@@ -1,0 +1,54 @@
+doctor_visit_examples:
+  - context: 醫師查房
+    examples:
+      - question: 有沒有哪裡不舒服？
+        keyword: 不適
+        responses:
+          - 吸不到氣。
+          - 痠痛。
+          - 很疲倦。
+          - 肚子餓。
+          - 嘴巴有點痛
+
+      - question: 今天精神怎麼樣？
+        keyword: 精神狀態
+        responses:
+          - 精神還不錯。
+          - 還是有點累。
+          - 跟昨天差不多。
+          - 沒睡好。
+
+      - question: 傷口覺得還好嗎？
+        keyword: 傷口
+        responses:
+          - 不錯，沒什麼大問題。
+          - 感覺有點腫腫的。
+          - 我覺得很痛。
+          - 是不是有點發紅？
+          - 味道很重、很臭。
+
+      - question: 口服止痛藥你覺得有效嗎？
+        keyword: 疼痛；藥物
+        responses:
+          - 還滿有效的。
+          - 還可以，比較不痛。
+          - 還是很痛。
+          - 用打針的比較有效。
+
+      - question: 對於治療方式，有想法了嗎？
+        keyword: 治療；意願
+        responses:
+          - 我決定要手術
+          - 我要化療
+          - 我要化療和放療
+          - 我只想放療
+          - 我不想做治療了。
+
+      - question: 你知道為什麼現在必須要裝鼻胃管嗎?
+        keyword: 治療；管路
+        responses:
+          - 因為嘴巴有傷口
+          - 因為吃東西可能會嗆到
+          - 嘴巴太痛，沒辦法正常吃飯
+          - 因為吃不下，營養不夠
+          - 我不知道
