@@ -15,6 +15,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import speech_recognition as sr
 import uvicorn
+import numpy as np
+from scipy.io import wavfile
+from fastapi.responses import FileResponse
 
 # 設置日誌記錄
 logging.basicConfig(
@@ -41,6 +44,7 @@ class TextRequest(BaseModel):
     text: str
     character_id: str
     session_id: Optional[str] = None
+    response_format: Optional[str] = "text"  # 可選值: "text" 或 "audio"
 
 class DialogueResponse(BaseModel):
     """對話回應模型"""
@@ -344,8 +348,9 @@ async def process_text_dialogue(
         text = body.get("text", "")
         character_id = body.get("character_id")
         session_id = body.get("session_id")
+        response_format = body.get("response_format", "text")
         
-        logger.debug(f"提取參數: text={text}, character_id={character_id}, session_id={session_id}")
+        logger.debug(f"提取參數: text={text}, character_id={character_id}, session_id={session_id}, response_format={response_format}")
         
         # 參數檢查
         if not text:
@@ -383,7 +388,35 @@ async def process_text_dialogue(
         )
         
         logger.debug(f"返回回應: {response}")
-        return response
+        
+        # 如果需要語音回覆，轉換文本為語音
+        if response_format == "audio":
+            # 選擇第一個回覆選項作為語音內容
+            text_to_speak = response.responses[0] if response.responses else "無回應"
+            
+            # 生成語音文件
+            audio_file_path = dummy_tts(text_to_speak)
+            
+            # 創建背景任務以刪除臨時文件
+            bg_tasks = BackgroundTasks()
+            bg_tasks.add_task(os.unlink, audio_file_path)
+            
+            # 返回語音文件
+            response = FileResponse(
+                path=audio_file_path,
+                media_type="audio/wav",
+                filename=f"response_{hash(text_to_speak)}.wav",
+                background=bg_tasks  # 使用正確創建的背景任務
+            )
+            # 添加會話ID到頭部
+            if hasattr(response, "session_id"):
+                response.headers["X-Session-ID"] = str(response.session_id)
+            else:
+                response.headers["X-Session-ID"] = str(session_id) if session_id else ""
+            return response
+        else:
+            # 返回正常的文本回覆
+            return response
         
     except json.JSONDecodeError as e:
         logger.error(f"JSON 解析錯誤: {e}")
@@ -399,6 +432,7 @@ async def process_audio_dialogue(
     audio_file: UploadFile = File(...),
     character_id: str = Form(...),
     session_id: Optional[str] = Form(None),
+    response_format: Optional[str] = Form("text"),  # 新增參數，默認為文本回覆
 ):
     """處理音頻對話請求
 
@@ -408,6 +442,7 @@ async def process_audio_dialogue(
         audio_file: 上傳的音頻文件
         character_id: 角色ID
         session_id: 會話ID (可選)
+        response_format: 回覆格式 (可選值: "text" 或 "audio")
 
     Returns:
         對話回應
@@ -441,7 +476,32 @@ async def process_audio_dialogue(
     )
     
     logger.debug(f"返回音頻對話回應: {response}")
-    return response
+    
+    # 如果需要語音回覆，轉換文本為語音
+    if response_format == "audio":
+        # 選擇第一個回覆選項作為語音內容
+        text_to_speak = response.responses[0] if response.responses else "無回應"
+        
+        # 生成語音文件
+        audio_file_path = dummy_tts(text_to_speak)
+        
+        # 創建背景任務以刪除臨時文件
+        bg_tasks = BackgroundTasks()
+        bg_tasks.add_task(os.unlink, audio_file_path)
+        
+        # 返回語音文件
+        response = FileResponse(
+            path=audio_file_path,
+            media_type="audio/wav",
+            filename=f"response_{hash(text_to_speak)}.wav",
+            background=bg_tasks  # 使用正確創建的背景任務
+        )
+        # 添加會話ID到頭部
+        response.headers["X-Session-ID"] = str(session_id) if session_id else ""
+        return response
+    else:
+        # 返回正常的文本回覆
+        return response
 
 @app.get("/api/health")
 async def health_check():
@@ -457,6 +517,41 @@ async def list_characters():
     except Exception as e:
         logger.error(f"列出角色時出錯: {e}")
         raise HTTPException(status_code=500, detail=f"無法列出可用角色: {str(e)}")
+
+# 添加一個簡單的 dummy TTS 函數
+def dummy_tts(text, voice_id="default"):
+    """生成一個 dummy 語音文件
+    
+    Args:
+        text: 要轉換為語音的文本
+        voice_id: 語音 ID (目前未使用)
+        
+    Returns:
+        臨時文件路徑
+    """
+    logger.debug(f"生成 dummy 語音: '{text}'")
+    # 創建一個與文本長度相關的音頻（只是為了讓不同文本有不同音頻）
+    sample_rate = 16000
+    duration = min(2 + len(text) * 0.05, 10)  # 根據文本長度調整，最長10秒
+    t = np.linspace(0, duration, int(sample_rate * duration))
+    
+    # 產生簡單的正弦波，頻率隨文本長度變化
+    frequency = 440 + (len(text) % 10) * 30
+    audio = np.sin(2 * np.pi * frequency * t) * 0.5
+    
+    # 轉換為16位整數
+    audio_int16 = (audio * 32767).astype(np.int16)
+    
+    # 創建臨時文件
+    temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    temp_file_path = temp_file.name
+    temp_file.close()
+    
+    # 保存為 WAV 文件
+    wavfile.write(temp_file_path, sample_rate, audio_int16)
+    logger.debug(f"已生成語音文件: {temp_file_path}")
+    
+    return temp_file_path
 
 # 如果直接運行此模塊，啟動服務器
 if __name__ == "__main__":
