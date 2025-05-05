@@ -52,6 +52,8 @@ def main():
         
         print(f"啟動醫護對話系統 UI，連接到 API 伺服器: {args.api_url}")
         print(f"UI 伺服器運行於: http://{args.host}:{args.port}")
+        if args.share:
+            print("正在創建公共分享連結...")
         
         # 啟動應用
         print("Launching app...")
