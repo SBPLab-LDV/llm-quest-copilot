@@ -72,6 +72,7 @@ class PromptManager:
         """
         # Get relevant examples
         examples = self.get_examples_for_context(current_state)
+        print(examples)
         
         # Format examples as text
         examples_text = ""
