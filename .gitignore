@@ -13,3 +13,5 @@ __pycache__/
 
 logs/
 recordings/
+third_party/
+markitdown/
