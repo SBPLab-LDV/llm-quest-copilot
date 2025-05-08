@@ -155,12 +155,15 @@ async def get_or_create_session(
         if character_config:
             try:
                 logger.debug(f"使用客戶端提供的配置創建角色")
+                logger.debug(f"配置內容: {character_config}")
                 # 使用 Character.from_yaml 方法將配置轉換為 Character 物件
                 character = Character.from_yaml(character_config)
+                logger.debug(f"成功創建角色對象: {character}")
                 character_cache[character_id] = character
                 logger.debug(f"已從客戶端配置創建角色: {character.name}")
             except Exception as e:
-                logger.error(f"從客戶端配置創建角色失敗: {e}, 嘗試使用本地配置")
+                logger.error(f"從客戶端配置創建角色失敗: {e}", exc_info=True)
+                logger.error(f"嘗試使用本地配置")
                 character = create_character(character_id)
                 character_cache[character_id] = character
         else:
