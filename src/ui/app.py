@@ -240,6 +240,9 @@ class DialogueApp:
                 # 添加用戶輸入到聊天歷史
                 history = history + [[text, None]]
                 
+                # 直接更新chatbot UI
+                text_chatbot.value = history
+                
                 # 發送請求
                 logger.info(f"發送文本: {text}")
                 response = self.api_client.send_text_message(text, "text")
@@ -257,6 +260,7 @@ class DialogueApp:
                         # 將 CONFUSED 狀態的回應加上提示
                         confused_response = response["responses"][0]
                         history[-1][1] = f"{confused_response} (系統暫時無法理解您的問題，請嘗試重新表述)"
+                        text_chatbot.value = history  # 再次更新UI
                         logger.debug("處理 CONFUSED 狀態回應")
                         # 隱藏回應選項
                         return "", history, sess_id, []
@@ -270,6 +274,7 @@ class DialogueApp:
                     # 處理錯誤
                     logger.warning(f"API 回應中沒有找到回應選項或回應選項為空: {response}")
                     history[-1][1] = "發生錯誤，無法獲取回應。"
+                    text_chatbot.value = history  # 更新UI显示错误信息
                     # 隱藏回應選項
                     return "", history, sess_id, []
             
@@ -430,17 +435,26 @@ class DialogueApp:
                     history = text_chatbot.value.copy() if text_chatbot.value else []
                     logger.info(f"History before update: {history}")
                     
+                    # 找到最近一次用户输入的内容
+                    last_user_input = "你好"  # 默认值
+                    # 如果有历史记录，尝试获取最后一次用户输入
+                    if history:
+                        for i in range(len(history)-1, -1, -1):
+                            if history[i][0]:  # 如果用户输入不为空
+                                last_user_input = history[i][0]
+                                break
+                    
                     if history and history[-1][1] is None:
                         history[-1][1] = response_text
                         logger.info(f"更新對話歷史: {history}")
                     elif history:
-                        # If there's already a response, create a new entry
-                        logger.info(f"Adding new entry to history")
-                        history.append(["", response_text])
+                        # If there's already a response, create a new entry with the last user input
+                        logger.info(f"Adding new entry to history with last user input: {last_user_input}")
+                        history.append([last_user_input, response_text])
                     else:
                         # If history is empty, create a new entry
                         logger.info(f"Creating new history")
-                        history = [["", response_text]]
+                        history = [[last_user_input, response_text]]
                     
                     logger.info(f"Updated history: {history}")
                     
@@ -484,17 +498,26 @@ class DialogueApp:
                     history = text_chatbot.value.copy() if text_chatbot.value else []
                     logger.info(f"History before update: {history}")
                     
+                    # 找到最近一次用户输入的内容
+                    last_user_input = "你好"  # 默认值
+                    # 如果有历史记录，尝试获取最后一次用户输入
+                    if history:
+                        for i in range(len(history)-1, -1, -1):
+                            if history[i][0]:  # 如果用户输入不为空
+                                last_user_input = history[i][0]
+                                break
+                    
                     if history and history[-1][1] is None:
                         history[-1][1] = response_text
                         logger.info(f"更新對話歷史: {history}")
                     elif history:
-                        # If there's already a response, create a new entry
-                        logger.info(f"Adding new entry to history")
-                        history.append(["", response_text])
+                        # If there's already a response, create a new entry with the last user input
+                        logger.info(f"Adding new entry to history with last user input: {last_user_input}")
+                        history.append([last_user_input, response_text])
                     else:
                         # If history is empty, create a new entry
                         logger.info(f"Creating new history")
-                        history = [["", response_text]]
+                        history = [[last_user_input, response_text]]
                     
                     logger.info(f"Updated history: {history}")
                     
@@ -533,13 +556,22 @@ class DialogueApp:
                     # Update the chat history directly
                     history = text_chatbot.value.copy() if text_chatbot.value else []
                     
+                    # 找到最近一次用户输入的内容
+                    last_user_input = "你好"  # 默认值
+                    if history:
+                        for i in range(len(history)-1, -1, -1):
+                            if history[i][0]:  # 如果用户输入不为空
+                                last_user_input = history[i][0]
+                                break
+                    
                     if history and history[-1][1] is None:
                         history[-1][1] = response_text
                         logger.info(f"更新對話歷史: {history}")
                     elif history:
-                        history.append(["", response_text])
+                        logger.info(f"Adding new entry to history with last user input: {last_user_input}")
+                        history.append([last_user_input, response_text])
                     else:
-                        history = [["", response_text]]
+                        history = [[last_user_input, response_text]]
                     
                     # Force update the chatbot directly
                     text_chatbot.value = history
@@ -575,13 +607,22 @@ class DialogueApp:
                     # Update the chat history directly
                     history = text_chatbot.value.copy() if text_chatbot.value else []
                     
+                    # 找到最近一次用户输入的内容
+                    last_user_input = "你好"  # 默认值
+                    if history:
+                        for i in range(len(history)-1, -1, -1):
+                            if history[i][0]:  # 如果用户输入不为空
+                                last_user_input = history[i][0]
+                                break
+                    
                     if history and history[-1][1] is None:
                         history[-1][1] = response_text
                         logger.info(f"更新對話歷史: {history}")
                     elif history:
-                        history.append(["", response_text])
+                        logger.info(f"Adding new entry to history with last user input: {last_user_input}")
+                        history.append([last_user_input, response_text])
                     else:
-                        history = [["", response_text]]
+                        history = [[last_user_input, response_text]]
                     
                     # Force update the chatbot directly
                     text_chatbot.value = history
@@ -617,13 +658,22 @@ class DialogueApp:
                     # Update the chat history directly
                     history = text_chatbot.value.copy() if text_chatbot.value else []
                     
+                    # 找到最近一次用户输入的内容
+                    last_user_input = "你好"  # 默认值
+                    if history:
+                        for i in range(len(history)-1, -1, -1):
+                            if history[i][0]:  # 如果用户输入不为空
+                                last_user_input = history[i][0]
+                                break
+                    
                     if history and history[-1][1] is None:
                         history[-1][1] = response_text
                         logger.info(f"更新對話歷史: {history}")
                     elif history:
-                        history.append(["", response_text])
+                        logger.info(f"Adding new entry to history with last user input: {last_user_input}")
+                        history.append([last_user_input, response_text])
                     else:
-                        history = [["", response_text]]
+                        history = [[last_user_input, response_text]]
                     
                     # Force update the chatbot directly
                     text_chatbot.value = history
