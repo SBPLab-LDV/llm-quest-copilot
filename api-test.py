@@ -1,7 +1,7 @@
 import requests
 import json
 
-# 樣本角色配置，用於測試動態配置功能
+# 樣本角色配置，用於測試動態配置功能 - 結構與 patient1_config 完全一致
 sample_character_config = {
     "name": "Dynamic Test Patient",
     "persona": "70歲測試男性，用於API動態加載",
@@ -9,7 +9,7 @@ sample_character_config = {
     "goal": "成功響應並確認動態配置已生效。",
     "details": {
         "fixed_settings": {
-            "流水編號": "DYN001",
+            "流水編號": 999,  # 使用數字類型，與 patient1_config 一致
             "年齡": 70,
             "性別": "男",
             "診斷": "API測試症",
@@ -27,6 +27,9 @@ sample_character_config = {
             "BMI": 22.9,
             "慢性病": "高血壓",
             "用藥史": "降壓藥",
+            "身體功能分數KPS": 95,  # 與 patient1_config 保持一致的字段
+            "現行職業類型": "自營商",
+            "現行職業狀態狀況與確診前相比是否改變": "暫停營業",
             "關鍵字": "動態配置",
             "個案現況": "這是一個通過API動態配置的測試角色"
         }
@@ -68,9 +71,27 @@ patient1_config = {
     }
 }
 
+# 使用與獨立測試相同的簡化角色配置
+simplified_config = {
+    "name": "Test Patient",
+    "persona": "測試角色",
+    "backstory": "這是一個用於測試的角色。",
+    "goal": "測試 DialogueManager 的創建",
+    "details": {
+        "fixed_settings": {
+            "流水編號": 99,
+            "年齡": 50,
+            "性別": "男"
+        },
+        "floating_settings": {
+            "關鍵字": "測試"
+        }
+    }
+}
+
 # 文本對話 (獲取文本回覆)
 def text_dialogue(text, character_id, session_id=None, character_config_payload=None):
-    url = "http://120.126.51.6:8000/api/dialogue/text"
+    url = "http://localhost:8000/api/dialogue/text"
     data = {
         "text": text,
         "character_id": character_id,
@@ -86,7 +107,7 @@ def text_dialogue(text, character_id, session_id=None, character_config_payload=
 
 # 文本對話 (獲取音頻回覆)
 def text_dialogue_with_audio(text, character_id, session_id=None, character_config_payload=None):
-    url = "http://120.126.51.6:8000/api/dialogue/text"
+    url = "http://localhost:8000/api/dialogue/text"
     data = {
         "text": text,
         "character_id": character_id,
@@ -120,7 +141,7 @@ def text_dialogue_with_audio(text, character_id, session_id=None, character_conf
 
 # 音頻對話 (獲取文本回覆)
 def audio_dialogue(audio_file_path, character_id, session_id=None, response_format="text", character_config_payload=None):
-    url = "http://120.126.51.6:8000/api/dialogue/audio"
+    url = "http://localhost:8000/api/dialogue/audio"
     
     with open(audio_file_path, "rb") as audio_file:
         files = {"audio_file": audio_file}
@@ -185,20 +206,32 @@ if "session_id" in dynamic_result:
 else:
     print("錯誤: 無法獲取動態角色會話 ID")
 
+# 測試使用簡化配置
+print("\n--- 測試使用簡化角色配置 ---")
+simplified_result = text_dialogue("您好，這是測試訊息", "simple_test", character_config_payload=simplified_config)
+print(f"簡化角色回應結果: {simplified_result}")
+if "session_id" in simplified_result:
+    simplified_session_id = simplified_result["session_id"]
+    print(f"簡化角色回應: {simplified_result['responses'][0]}")
+    
+    # 與簡化角色繼續對話
+    simplified_followup_result = text_dialogue("這是後續測試訊息", "simple_test", simplified_session_id)
+    print(f"簡化角色後續回應: {simplified_followup_result['responses'][0] if 'responses' in simplified_followup_result else simplified_followup_result}")
+else:
+    print("錯誤: 無法獲取簡化角色會話 ID")
+
 # 原有的音頻相關測試 (保留但註釋掉，以便選擇性執行)
-'''
 # 使用示例: 文本輸入，音頻回覆
-audio_response = text_dialogue_with_audio("請說說您的傷口狀況", "1", session_id)
-if "audio_file" in audio_response:
-    print(f"音頻回覆已保存至: {audio_response['audio_file']}")
-    session_id = audio_response["session_id"]
-
-# 使用示例: 音頻輸入，文本回覆
-audio_text_result = audio_dialogue("recording.wav", "1", session_id)
-print(f"病患回應: {audio_text_result['responses'][0]}")
-
-# 使用示例: 音頻輸入，音頻回覆
-audio_audio_result = audio_dialogue("recording.wav", "1", session_id, response_format="audio")
-if "audio_file" in audio_audio_result:
-    print(f"音頻回覆已保存至: {audio_audio_result['audio_file']}")
-'''
+# audio_response = text_dialogue_with_audio("請說說您的傷口狀況", "1", session_id)
+# if "audio_file" in audio_response:
+#     print(f"音頻回覆已保存至: {audio_response['audio_file']}")
+#     session_id = audio_response["session_id"]
+# 
+# # 使用示例: 音頻輸入，文本回覆
+# audio_text_result = audio_dialogue("recording.wav", "1", session_id)
+# print(f"病患回應: {audio_text_result['responses'][0]}")
+# 
+# # 使用示例: 音頻輸入，音頻回覆
+# audio_audio_result = audio_dialogue("recording.wav", "1", session_id, response_format="audio")
+# if "audio_file" in audio_audio_result:
+#     print(f"音頻回覆已保存至: {audio_audio_result['audio_file']}")
