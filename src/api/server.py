@@ -35,9 +35,6 @@ from ..core.dialogue import DialogueManager
 from ..core.character import Character
 from ..core.state import DialogueState
 
-# 導入現有的角色加載功能
-from ..utils.config import load_character, list_available_characters
-
 # 定義請求和回應模型
 class TextRequest(BaseModel):
     """文本請求模型"""
@@ -112,7 +109,7 @@ async def get_or_create_session(
         request: 原始請求對象，用於日誌記錄
         session_id: 客戶端提供的會話ID
         character_id: 角色ID，用於創建新會話時
-        character_config: 客戶端提供的角色設定 (可選)
+        character_config: 客戶端提供的角色設定 (必要)
 
     Returns:
         會話數據字典
@@ -151,7 +148,7 @@ async def get_or_create_session(
     if character_id not in character_cache:
         logger.debug(f"創建新角色: {character_id}")
         
-        # 如果提供了 character_config, 使用它來創建角色
+        # 必須提供 character_config 來創建角色
         if character_config:
             try:
                 logger.debug(f"使用客戶端提供的配置創建角色")
@@ -163,11 +160,13 @@ async def get_or_create_session(
                 logger.debug(f"已從客戶端配置創建角色: {character.name}")
             except Exception as e:
                 logger.error(f"從客戶端配置創建角色失敗: {e}", exc_info=True)
-                logger.error(f"嘗試使用本地配置")
+                # 使用默認配置
+                logger.warning(f"使用默認配置創建角色")
                 character = create_character(character_id)
                 character_cache[character_id] = character
         else:
-            # 沒有提供客戶端配置，使用本地配置
+            # 沒有提供客戶端配置，使用默認配置
+            logger.warning(f"未提供角色配置，使用默認配置")
             character = create_character(character_id)
             character_cache[character_id] = character
     
@@ -199,7 +198,7 @@ async def get_or_create_session(
     return session_store[new_session_id]
 
 def create_character(character_id: str) -> Character:
-    """創建角色實例，優先使用配置文件加載
+    """創建角色實例，使用默認值
     
     Args:
         character_id: 角色ID
@@ -207,37 +206,29 @@ def create_character(character_id: str) -> Character:
     Returns:
         Character 實例
     """
-    try:
-        # 嘗試使用配置加載器加載角色
-        logger.debug(f"嘗試從配置加載角色: {character_id}")
-        character = load_character(character_id)
-        logger.debug(f"成功從配置加載角色: {character.name}")
-        return character
-    except Exception as e:
-        logger.warning(f"從配置加載角色失敗: {e}，嘗試手動創建")
-        
-        # 回退到手動創建
-        # 直接使用匹配 Character 類定義的參數
-        fallback_data = {
-            "name": f"Patient_{character_id}",
-            "persona": "一般病患",
-            "backstory": "Sample background",
-            "goal": "與護理人員交流",
-            "details": {
-                "fixed_settings": {
-                    "流水編號": character_id,
-                    "年齡": 50,
-                    "性別": "未指定"
-                },
-                "floating_settings": {
-                    "目前接受治療場所": "醫院",
-                    "關鍵字": "一般情況"
-                }
+    logger.warning(f"使用默認設置創建角色 {character_id}，因為客戶端未提供配置")
+    
+    # 創建一個具有默認值的角色
+    fallback_data = {
+        "name": f"Default_Patient_{character_id}",
+        "persona": "未指定病患，使用默認配置",
+        "backstory": "此為系統創建的默認病患角色，缺少詳細背景資料。",
+        "goal": "與護理人員交流基本需求",
+        "details": {
+            "fixed_settings": {
+                "流水編號": character_id,
+                "年齡": 50,
+                "性別": "未指定"
+            },
+            "floating_settings": {
+                "目前接受治療場所": "未指定",
+                "關鍵字": "一般狀況"
             }
         }
-        
-        # 使用 from_yaml 方法創建 Character 物件
-        return Character.from_yaml(fallback_data)
+    }
+    
+    # 使用 from_yaml 方法創建 Character 物件
+    return Character.from_yaml(fallback_data)
 
 # 語音轉文本函數
 async def speech_to_text(audio_file: UploadFile) -> str:
@@ -475,12 +466,20 @@ async def process_audio_dialogue(
     Returns:
         對話回應
     """
-    # 獲取或創建會話
-    session = await get_or_create_session(
-        request=request,
-        session_id=session_id,
-        character_id=character_id
-    )
+    # 註意: 由於 multipart/form-data 無法直接傳輸複雜的 JSON 數據，
+    # 因此音頻 API 不支持直接接收 character_config 參數。
+    # 建議使用文本 API 先創建帶有角色配置的會話，然後將會話 ID 傳遞給音頻 API。
+    
+    # 檢查會話是否存在
+    if not session_id or session_id not in session_store:
+        logger.warning(f"音頻 API 請求未提供有效的會話 ID: {session_id}")
+        raise HTTPException(
+            status_code=400,
+            detail="音頻 API 需要提供有效會話 ID。請先使用文本 API 創建會話，並提供角色配置。"
+        )
+    
+    # 獲取會話
+    session = session_store[session_id]
     
     # 語音轉文本
     text = await speech_to_text(audio_file)
@@ -535,16 +534,6 @@ async def process_audio_dialogue(
 async def health_check():
     """健康檢查端點"""
     return {"status": "ok", "active_sessions": len(session_store)}
-
-@app.get("/api/characters")
-async def list_characters():
-    """列出所有可用的角色"""
-    try:
-        characters = list_available_characters()
-        return {"characters": characters}
-    except Exception as e:
-        logger.error(f"列出角色時出錯: {e}")
-        raise HTTPException(status_code=500, detail=f"無法列出可用角色: {str(e)}")
 
 # 添加一個簡單的 dummy TTS 函數
 def dummy_tts(text, voice_id="default"):
@@ -611,13 +600,6 @@ if __name__ == "__main__":
     character_cache.clear()
     session_store.clear()
     logger.info("已清理角色和會話緩存，啟動服務器...")
-    
-    # 打印所有已加載的角色
-    try:
-        characters = list_available_characters()
-        logger.info(f"已加載角色: {list(characters.keys())}")
-    except Exception as e:
-        logger.error(f"加載角色列表失敗: {e}")
     
     # 啟動服務器
     uvicorn.run("src.api.server:app", host="0.0.0.0", port=8000, reload=True) 

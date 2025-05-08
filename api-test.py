@@ -33,6 +33,41 @@ sample_character_config = {
     }
 }
 
+# 另一個樣本角色配置，模擬原始靜態角色
+patient1_config = {
+    "name": "Patient 1",
+    "persona": "69歲男性，口腔癌術後第15天，整形外科病房",
+    "backstory": "右下齒齦鱗狀細胞癌，pT2N0M0, stage II。術後15天，右臉頰縫線處持續有黃色分泌物，傷口紅腫，預計兩天後全身麻醉清創手術。醫師查房說明病情和手術計畫。",
+    "goal": "向醫護人員清楚表達傷口狀況和對手術計畫的理解。",
+    "details": {
+        "fixed_settings": {
+            "流水編號": 1,
+            "年齡": 69,
+            "性別": "男",
+            "診斷": "齒齦癌",
+            "分期": "pT2N0M0, stage II",
+            "腫瘤方向": "右側",
+            "手術術式": "腫瘤切除+皮瓣重建"
+        },
+        "floating_settings": {
+            "目前接受治療場所": "病房",
+            "目前治療階段": "手術後/出院前",
+            "目前治療狀態": "腫瘤切除術後，尚未進行化學治療與放射線置離療",
+            "腫瘤復發": "無",
+            "身高": 173,
+            "體重": 76.8,
+            "BMI": 25.7,
+            "慢性病": "高血壓、糖尿病",
+            "用藥史": "Doxaben、Metformin、cefazolin",
+            "身體功能分數KPS": 90,
+            "現行職業類型": "受聘僱",
+            "現行職業狀態狀況與確診前相比是否改變": "退休",
+            "關鍵字": "傷口",
+            "個案現況": "病人右臉頰縫線持續有黃色分泌物，傷口處有紅腫問題，預計兩天後行清創手術，採全身麻醉方式，醫師查房說明病情、手術計畫。"
+        }
+    }
+}
+
 # 文本對話 (獲取文本回覆)
 def text_dialogue(text, character_id, session_id=None, character_config_payload=None):
     url = "http://120.126.51.6:8000/api/dialogue/text"
@@ -84,7 +119,7 @@ def text_dialogue_with_audio(text, character_id, session_id=None, character_conf
         return response.json()
 
 # 音頻對話 (獲取文本回覆)
-def audio_dialogue(audio_file_path, character_id, session_id=None, response_format="text"):
+def audio_dialogue(audio_file_path, character_id, session_id=None, response_format="text", character_config_payload=None):
     url = "http://120.126.51.6:8000/api/dialogue/audio"
     
     with open(audio_file_path, "rb") as audio_file:
@@ -96,6 +131,10 @@ def audio_dialogue(audio_file_path, character_id, session_id=None, response_form
         
         if session_id:
             data["session_id"] = session_id
+            
+        # 無法通過 FormData 傳遞複雜 JSON，提示用戶應該先使用文本 API 創建會話
+        if character_config_payload and not session_id:
+            print("警告: 音頻 API 無法直接傳遞角色配置。請先使用文本 API 創建會話，然後在此提供會話 ID。")
             
         response = requests.post(url, files=files, data=data)
         
@@ -118,21 +157,33 @@ def audio_dialogue(audio_file_path, character_id, session_id=None, response_form
             # 文本回覆或錯誤
             return response.json()
 
-# 測試現有角色
-print("\n--- 測試使用現有角色 ---")
-text_result = text_dialogue("您今天感覺如何?", "1")
-session_id = text_result["session_id"]
-print(f"病患回應: {text_result['responses'][0]}")
+# 測試使用提供的角色配置（替代原來的靜態定義角色）
+print("\n--- 測試使用病患 1 角色配置 ---")
+text_result = text_dialogue("您今天感覺如何?", "1", character_config_payload=patient1_config)
+print(f"動態角色回應結果: {text_result}")
+if "session_id" in text_result:
+    session_id = text_result["session_id"]
+    print(f"病患回應: {text_result['responses'][0]}")
+    
+    # 繼續對話
+    followup_result = text_dialogue("疼痛程度如何？", "1", session_id)
+    print(f"後續回應: {followup_result['responses'][0] if 'responses' in followup_result else followup_result}")
+else:
+    print("錯誤: 無法獲取會話 ID")
 
 # 測試使用動態配置的角色
 print("\n--- 測試使用動態配置角色 ---")
 dynamic_result = text_dialogue("您好，請介紹一下您的情況", "dynamic_patient", character_config_payload=sample_character_config)
-dynamic_session_id = dynamic_result["session_id"]
-print(f"動態角色回應: {dynamic_result['responses'][0]}")
-
-# 與動態角色繼續對話
-dynamic_followup_result = text_dialogue("您是從哪裡來的?", "dynamic_patient", dynamic_session_id)
-print(f"動態角色後續回應: {dynamic_followup_result['responses'][0]}")
+print(f"動態角色回應結果: {dynamic_result}")
+if "session_id" in dynamic_result:
+    dynamic_session_id = dynamic_result["session_id"]
+    print(f"動態角色回應: {dynamic_result['responses'][0]}")
+    
+    # 與動態角色繼續對話
+    dynamic_followup_result = text_dialogue("您是從哪裡來的?", "dynamic_patient", dynamic_session_id)
+    print(f"動態角色後續回應: {dynamic_followup_result['responses'][0] if 'responses' in dynamic_followup_result else dynamic_followup_result}")
+else:
+    print("錯誤: 無法獲取動態角色會話 ID")
 
 # 原有的音頻相關測試 (保留但註釋掉，以便選擇性執行)
 '''
