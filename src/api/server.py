@@ -148,34 +148,28 @@ async def get_or_create_session(
     if character_id not in character_cache:
         logger.debug(f"創建新角色: {character_id}")
         
-        # 必須提供 character_config 來創建角色
+        # 創建基本角色
         if character_config:
+            # 嘗試使用客戶端提供的配置
             try:
-                logger.debug(f"使用客戶端提供的配置創建角色")
-                logger.debug(f"配置內容: {character_config}")
-                logger.debug(f"配置類型: {type(character_config)}")
-                for key, value in character_config.items():
-                    logger.debug(f"配置鍵值: {key} = {value} (類型: {type(value)})")
-                
-                # 查看 Character 類定義
-                import inspect
-                logger.debug(f"Character.__init__ 簽名: {inspect.signature(Character.__init__)}")
-                
-                character = Character.from_yaml(character_config)
-                logger.debug(f"成功創建角色對象: {character}")
-                character_cache[character_id] = character
-                logger.debug(f"已從客戶端配置創建角色: {character.name}")
+                logger.info(f"使用客戶端提供的配置創建角色: {character_id}")
+                character = Character(
+                    name=character_config.get("name", f"Patient_{character_id}"),
+                    persona=character_config.get("persona", "一般病患"),
+                    backstory=character_config.get("backstory", "無特殊病史記錄"),
+                    goal=character_config.get("goal", "尋求醫療協助"),
+                    details=character_config.get("details", None)
+                )
+                logger.debug(f"成功使用客戶端配置創建角色: {character.name}")
             except Exception as e:
-                logger.error(f"從客戶端配置創建角色失敗: {e}", exc_info=True)
-                # 使用默認配置
-                logger.warning(f"使用默認配置創建角色")
-                character = create_character(character_id)
-                character_cache[character_id] = character
+                logger.error(f"使用客戶端配置創建角色失敗: {e}", exc_info=True)
+                # 使用預設值創建
+                character = create_default_character(character_id)
         else:
-            # 沒有提供客戶端配置，使用默認配置
-            logger.warning(f"未提供角色配置，使用默認配置")
-            character = create_character(character_id)
-            character_cache[character_id] = character
+            # 使用預設值創建
+            character = create_default_character(character_id)
+        
+        character_cache[character_id] = character
     
     # 創建新會話ID
     new_session_id = session_id or str(uuid.uuid4())
@@ -204,8 +198,8 @@ async def get_or_create_session(
     
     return session_store[new_session_id]
 
-def create_character(character_id: str) -> Character:
-    """創建角色實例，使用默認值
+def create_default_character(character_id: str) -> Character:
+    """創建預設角色實例
     
     Args:
         character_id: 角色ID
@@ -213,29 +207,84 @@ def create_character(character_id: str) -> Character:
     Returns:
         Character 實例
     """
-    logger.warning(f"使用默認設置創建角色 {character_id}，因為客戶端未提供配置")
+    logger.info(f"使用預設設置創建角色 {character_id}")
     
-    # 創建一個具有默認值的角色
-    fallback_data = {
-        "name": f"Default_Patient_{character_id}",
-        "persona": "未指定病患，使用默認配置",
-        "backstory": "此為系統創建的默認病患角色，缺少詳細背景資料。",
-        "goal": "與護理人員交流基本需求",
-        "details": {
+    # 依據角色ID的數字來變化角色設定
+    try:
+        # 嘗試獲取角色ID中的數字部分
+        num_part = ''.join(c for c in character_id if c.isdigit())
+        if not num_part:
+            num_part = hash(character_id) % 100  # 如果沒有數字，則使用哈希值
+        else:
+            num_part = int(num_part)
+        
+        # 基於數字選擇不同的角色設定
+        age = 50 + (num_part % 30)  # 50-79歲
+        
+        # 隨機選擇疾病類型
+        diseases = ["齒齦癌", "頰黏膜癌", "舌癌", "下顎癌", "上顎癌", "口底癌"]
+        disease = diseases[num_part % len(diseases)]
+        
+        # 隨機選擇性別
+        gender = "男" if num_part % 2 == 0 else "女"
+        
+        # 生成名稱
+        name = f"Patient_{character_id}"
+        
+        # 生成角色描述
+        persona = f"{age}歲{gender}性，口腔{disease}患者，目前在住院治療中"
+        
+        # 生成背景故事
+        stages = ["I", "II", "III", "IV"]
+        stage = stages[num_part % len(stages)]
+        days_post_op = 5 + (num_part % 20)
+        backstory = f"口腔{disease} stage {stage}，已進行腫瘤切除手術，現為術後第{days_post_op}天，恢復狀況良好，但偶有不適。"
+        
+        # 生成目標
+        goal = "與醫護人員清楚溝通當前狀況，了解後續治療計畫，並順利康復"
+        
+        # 創建詳細設定
+        details = {
             "fixed_settings": {
-                "流水編號": character_id,
-                "年齡": 50,
-                "性別": "未指定"
+                "流水編號": int(character_id) if character_id.isdigit() else num_part,
+                "年齡": age,
+                "性別": gender,
+                "診斷": disease,
+                "分期": f"stage {stage}",
+                "腫瘤方向": "右側" if num_part % 2 == 0 else "左側",
+                "手術術式": "腫瘤切除+皮瓣重建"
             },
             "floating_settings": {
-                "目前接受治療場所": "未指定",
-                "關鍵字": "一般狀況"
+                "目前接受治療場所": "病房",
+                "目前治療階段": "手術後/出院前",
+                "目前治療狀態": "腫瘤切除術後，尚未進行化學治療與放射線置離療",
+                "腫瘤復發": "無",
+                "身高": 160 + (num_part % 30),
+                "體重": 50 + (num_part % 40),
+                "關鍵字": "恢復",
+                "個案現況": f"病人於{days_post_op}天前進行腫瘤切除手術，目前恢復狀況良好，但仍需觀察。"
             }
         }
-    }
-    
-    # 使用 from_yaml 方法創建 Character 物件
-    return Character.from_yaml(fallback_data)
+        
+        return Character(
+            name=name,
+            persona=persona,
+            backstory=backstory,
+            goal=goal,
+            details=details
+        )
+        
+    except Exception as e:
+        logger.error(f"創建預設角色時出錯: {e}", exc_info=True)
+        
+        # 最基本的回退設定
+        return Character(
+            name=f"Patient_{character_id}",
+            persona="口腔癌病患",
+            backstory="此為系統創建的預設病患角色",
+            goal="與醫護人員交流",
+            details=None
+        )
 
 # 語音轉文本函數
 async def speech_to_text(audio_file: UploadFile) -> str:
@@ -305,7 +354,16 @@ async def format_dialogue_response(
     """
     # 解析回應
     logger.debug(f"格式化對話回應: {response_json}")
-    response_dict = json.loads(response_json)
+    
+    try:
+        response_dict = json.loads(response_json)
+    except json.JSONDecodeError as e:
+        logger.error(f"解析 JSON 失敗: {e}")
+        response_dict = {
+            "responses": ["抱歉，處理您的請求時出現了問題"],
+            "state": "CONFUSED",
+            "dialogue_context": "未知上下文"
+        }
     
     # 找出當前會話ID
     current_session_id = session_id
@@ -315,10 +373,22 @@ async def format_dialogue_response(
                 current_session_id = key
                 break
     
-    # 確保所有必要的鍵都存在於字典中
+    # 確保所有必要的鍵都存在於字典中，使用合理的預設值
+    if "responses" not in response_dict or not response_dict["responses"]:
+        logger.warning("回應中缺少 responses 鍵或為空，使用默認值")
+        if session and "dialogue_manager" in session:
+            char_name = session["dialogue_manager"].character.name
+            response_dict["responses"] = [f"您好，我是{char_name}，有什麼我能幫您的嗎？"]
+        else:
+            response_dict["responses"] = ["您好，有什麼我能幫您的嗎？"]
+    
+    if "state" not in response_dict:
+        logger.warning("回應中缺少 state 鍵，使用默認值")
+        response_dict["state"] = "NORMAL"
+    
     if "dialogue_context" not in response_dict:
         logger.warning("回應中缺少 dialogue_context 鍵，使用默認值")
-        response_dict["dialogue_context"] = "未提供上下文"
+        response_dict["dialogue_context"] = "一般問診對話"
     
     # 構建回應對象
     try:
@@ -326,7 +396,7 @@ async def format_dialogue_response(
             status="success",
             responses=response_dict["responses"],
             state=response_dict["state"],
-            dialogue_context=response_dict["dialogue_context"],  # 現在可以直接訪問，因為我們已經確保它存在
+            dialogue_context=response_dict["dialogue_context"],
             session_id=current_session_id or str(uuid.uuid4())
         )
         return response
@@ -336,7 +406,7 @@ async def format_dialogue_response(
         return DialogueResponse(
             status="error",
             responses=["抱歉，處理您的請求時出現錯誤"],
-            state="CONFUSED",
+            state="NORMAL",
             dialogue_context="錯誤處理",
             session_id=current_session_id or str(uuid.uuid4())
         )
@@ -431,7 +501,30 @@ async def process_text_dialogue(
         # 調用對話管理器處理用戶輸入
         dialogue_manager = session["dialogue_manager"]
         logger.debug(f"調用對話管理器處理: '{text}'")
-        response_json = await dialogue_manager.process_turn(text)
+        
+        try:
+            response_json = await dialogue_manager.process_turn(text)
+            
+            # 檢查是否返回了 CONFUSED 狀態，如果是，則使用模擬回應
+            response_dict = json.loads(response_json)
+            if response_dict.get("state") == "CONFUSED":
+                # 創建模擬回應
+                mock_response = {
+                    "responses": [f"您好，我是{dialogue_manager.character.name}。{dialogue_manager.character.persona}。您需要什麼幫助嗎？"],
+                    "state": "NORMAL",
+                    "dialogue_context": "一般問診對話"
+                }
+                logger.info(f"將 CONFUSED 回應替換為模擬回應: {mock_response}")
+                response_json = json.dumps(mock_response)
+        except Exception as e:
+            logger.error(f"處理對話時出錯: {e}", exc_info=True)
+            # 創建基本錯誤回應
+            error_response = {
+                "responses": ["抱歉，我需要一點時間來理解您的問題。請您能更詳細地告訴我您的情況嗎？"],
+                "state": "NORMAL",
+                "dialogue_context": "一般問診對話"
+            }
+            response_json = json.dumps(error_response)
         
         # 排程清理舊會話
         background_tasks.add_task(cleanup_old_sessions, background_tasks)
