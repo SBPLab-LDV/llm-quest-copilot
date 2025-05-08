@@ -153,7 +153,14 @@ async def get_or_create_session(
             try:
                 logger.debug(f"使用客戶端提供的配置創建角色")
                 logger.debug(f"配置內容: {character_config}")
-                # 使用 Character.from_yaml 方法將配置轉換為 Character 物件
+                logger.debug(f"配置類型: {type(character_config)}")
+                for key, value in character_config.items():
+                    logger.debug(f"配置鍵值: {key} = {value} (類型: {type(value)})")
+                
+                # 查看 Character 類定義
+                import inspect
+                logger.debug(f"Character.__init__ 簽名: {inspect.signature(Character.__init__)}")
+                
                 character = Character.from_yaml(character_config)
                 logger.debug(f"成功創建角色對象: {character}")
                 character_cache[character_id] = character
