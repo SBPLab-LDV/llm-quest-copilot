@@ -45,6 +45,7 @@ class TextRequest(BaseModel):
     character_id: str
     session_id: Optional[str] = None
     response_format: Optional[str] = "text"  # 可選值: "text" 或 "audio"
+    character_config: Optional[Dict[str, Any]] = None  # 客戶端提供的角色配置
 
 class DialogueResponse(BaseModel):
     """對話回應模型"""
@@ -102,7 +103,8 @@ async def log_requests(request: Request, call_next):
 async def get_or_create_session(
     request: Request,
     session_id: Optional[str] = None,
-    character_id: Optional[str] = None
+    character_id: Optional[str] = None,
+    character_config: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """獲取現有會話或創建新會話
 
@@ -110,28 +112,32 @@ async def get_or_create_session(
         request: 原始請求對象，用於日誌記錄
         session_id: 客戶端提供的會話ID
         character_id: 角色ID，用於創建新會話時
+        character_config: 客戶端提供的角色設定 (可選)
 
     Returns:
         會話數據字典
     """
-    logger.debug(f"嘗試獲取或創建會話: session_id={session_id}, character_id={character_id}")
+    logger.debug(f"嘗試獲取或創建會話: session_id={session_id}, character_id={character_id}, character_config={'提供' if character_config else '未提供'}")
     
     # 如果已存在會話，則返回
     if session_id and session_id in session_store:
         logger.debug(f"找到現有會話: {session_id}")
         return session_store[session_id]
     
-    # 嘗試從請求體獲取 character_id (如果未直接提供)
-    if not character_id:
+    # 嘗試從請求體獲取 character_id 和 character_config (如果未直接提供)
+    if not character_id or character_config is None:
         try:
             # 重新讀取請求體
             body = await request.json()
             logger.debug(f"解析後的請求體: {body}")
-            if "character_id" in body:
+            if "character_id" in body and not character_id:
                 character_id = body["character_id"]
                 logger.debug(f"從請求體提取 character_id: {character_id}")
+            if "character_config" in body and character_config is None:
+                character_config = body["character_config"]
+                logger.debug(f"從請求體提取 character_config")
         except Exception as e:
-            logger.error(f"從請求體提取 character_id 時出錯: {e}")
+            logger.error(f"從請求體提取數據時出錯: {e}")
         
     # 驗證 character_id
     if not character_id:
@@ -144,8 +150,23 @@ async def get_or_create_session(
     # 獲取或創建角色實例
     if character_id not in character_cache:
         logger.debug(f"創建新角色: {character_id}")
-        character = create_character(character_id)
-        character_cache[character_id] = character
+        
+        # 如果提供了 character_config, 使用它來創建角色
+        if character_config:
+            try:
+                logger.debug(f"使用客戶端提供的配置創建角色")
+                # 使用 Character.from_yaml 方法將配置轉換為 Character 物件
+                character = Character.from_yaml(character_config)
+                character_cache[character_id] = character
+                logger.debug(f"已從客戶端配置創建角色: {character.name}")
+            except Exception as e:
+                logger.error(f"從客戶端配置創建角色失敗: {e}, 嘗試使用本地配置")
+                character = create_character(character_id)
+                character_cache[character_id] = character
+        else:
+            # 沒有提供客戶端配置，使用本地配置
+            character = create_character(character_id)
+            character_cache[character_id] = character
     
     # 創建新會話ID
     new_session_id = session_id or str(uuid.uuid4())
@@ -349,8 +370,9 @@ async def process_text_dialogue(
         character_id = body.get("character_id")
         session_id = body.get("session_id")
         response_format = body.get("response_format", "text")
+        character_config = body.get("character_config")  # 提取客戶端提供的角色配置
         
-        logger.debug(f"提取參數: text={text}, character_id={character_id}, session_id={session_id}, response_format={response_format}")
+        logger.debug(f"提取參數: text={text}, character_id={character_id}, session_id={session_id}, response_format={response_format}, character_config={'提供' if character_config else '未提供'}")
         
         # 參數檢查
         if not text:
@@ -362,7 +384,8 @@ async def process_text_dialogue(
         session = await get_or_create_session(
             request=request,
             session_id=session_id,
-            character_id=character_id
+            character_id=character_id,
+            character_config=character_config  # 傳遞客戶端提供的角色配置
         )
         
         # 更新會話活動時間
