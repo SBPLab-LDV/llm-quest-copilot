@@ -129,13 +129,31 @@ class DialogueManager:
                 current_state=self.current_state.value,
                 conversation_history=self._format_conversation_history()
             )
+            
+            # 記錄提示詞 - 新增記錄
+            logger = logging.getLogger(__name__)
+            logger.debug(f"===== 發送至 LLM 的提示詞 =====")
+            logger.debug(f"{prompt}")
+            logger.debug(f"===== 提示詞結束 =====")
 
             # 獲取回應
             response = self.gemini_client.generate_response(prompt)
+            
+            # 記錄 LLM 的原始回應 - 新增記錄
+            logger.debug(f"===== 收到的 LLM 原始回應 =====")
+            logger.debug(f"{response}")
+            logger.debug(f"===== 原始回應結束 =====")
+            
             print(response)
             
             # 清理並解析JSON
             cleaned_response = self._clean_json_string(response)
+            
+            # 記錄清理後的回應 - 新增記錄
+            logger.debug(f"===== 清理後的 JSON 回應 =====")
+            logger.debug(f"{cleaned_response}")
+            logger.debug(f"===== 清理後回應結束 =====")
+            
             response_dict = json.loads(cleaned_response)
             
             # 驗證回應格式
