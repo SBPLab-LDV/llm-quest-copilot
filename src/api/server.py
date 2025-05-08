@@ -13,6 +13,9 @@ import tempfile
 import json
 from datetime import datetime
 from typing import Dict, Optional, List, Any, Union
+import sys
+import codecs
+from dataclasses import asdict
 
 import numpy as np
 from scipy.io import wavfile
@@ -23,15 +26,45 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# 設置日誌記錄
+# 添加更完整的錯誤處理和日誌記錄
+import traceback
+
+# 自定義 StreamHandler 來處理 Windows 控制台編碼問題
+class SafeStreamHandler(logging.StreamHandler):
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            # 安全輸出，捕獲任何編碼錯誤
+            try:
+                stream.write(msg + self.terminator)
+            except UnicodeEncodeError:
+                # 對於 Windows 控制台，移除不能顯示的字符或使用替代字符
+                safe_msg = "".join(c if ord(c) < 128 else '?' for c in msg)
+                stream.write(safe_msg + self.terminator)
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+# 設置日誌記錄器，確保使用 UTF-8 編碼
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),  # 輸出到控制台
-        logging.FileHandler('api_server.log')  # 輸出到文件
+        logging.FileHandler('api_server.log', mode='w', encoding='utf-8')
     ]
 )
+
+# 添加安全控制台處理器
+console_handler = SafeStreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+# 獲取根日誌記錄器並添加處理器
+root_logger = logging.getLogger()
+root_logger.addHandler(console_handler)
+
+# 模組日誌記錄器
 logger = logging.getLogger(__name__)
 
 # 導入現有的對話系統
@@ -55,6 +88,11 @@ class DialogueResponse(BaseModel):
     state: str
     dialogue_context: str
     session_id: str
+
+class SelectResponseRequest(BaseModel):
+    """選擇回應請求模型"""
+    session_id: str
+    selected_response: str
 
 # 會話存儲，用於維護多個客戶端的對話狀態
 session_store: Dict[str, Dict[str, Any]] = {}
@@ -476,14 +514,18 @@ async def process_text_dialogue(
         else:
             # 創建新會話 - 使用 get_or_create_session 處理 character_config
             try:
+                logger.debug("嘗試創建新會話")
                 session = await get_or_create_session(
                     request=request,
                     character_id=character_id,
                     character_config=character_config
                 )
                 session_id = next(key for key, value in session_store.items() if value is session)
+                logger.debug(f"成功創建新會話，ID: {session_id}")
             except Exception as e:
                 logger.error(f"創建會話時出錯: {e}", exc_info=True)
+                # 記錄詳細的堆疊跟踪
+                logger.error(f"詳細錯誤堆疊: {traceback.format_exc()}")
                 raise HTTPException(
                     status_code=500,
                     detail=f"創建會話失敗: {str(e)}"
@@ -492,24 +534,42 @@ async def process_text_dialogue(
         # 在調用對話管理器前添加診斷信息
         logger.debug(f"使用的角色信息: id={character_id}, name={session['dialogue_manager'].character.name}")
         
-        # 調用對話管理器處理用戶輸入
-        dialogue_manager = session["dialogue_manager"]
-        logger.debug(f"調用對話管理器處理: '{text}'")
-        
-        # 直接使用對話管理器處理
-        response_json = await dialogue_manager.process_turn(text)
+        try:
+            # 調用對話管理器處理用戶輸入
+            dialogue_manager = session["dialogue_manager"]
+            logger.debug(f"調用對話管理器處理: '{text}'")
+            
+            # 直接使用對話管理器處理
+            response_json = await dialogue_manager.process_turn(text)
+            logger.debug(f"對話管理器返回結果: {response_json}")
+        except Exception as e:
+            logger.error(f"對話管理器處理輸入時出錯: {e}", exc_info=True)
+            # 記錄詳細的堆疊跟踪
+            logger.error(f"詳細錯誤堆疊: {traceback.format_exc()}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"對話處理失敗: {str(e)}"
+            )
         
         # 排程清理舊會話
         background_tasks.add_task(cleanup_old_sessions, background_tasks)
         
         # 使用輔助函數格式化回應
-        response = await format_dialogue_response(
-            response_json=response_json,
-            session_id=session_id,
-            session=session
-        )
-        
-        logger.debug(f"返回回應: {response}")
+        try:
+            response = await format_dialogue_response(
+                response_json=response_json,
+                session_id=session_id,
+                session=session
+            )
+            logger.debug(f"返回回應: {response}")
+        except Exception as e:
+            logger.error(f"格式化回應時出錯: {e}", exc_info=True)
+            # 記錄詳細的堆疊跟踪
+            logger.error(f"詳細錯誤堆疊: {traceback.format_exc()}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"格式化回應失敗: {str(e)}"
+            )
         
         # 如果需要語音回覆，轉換文本為語音
         if response_format == "audio":
@@ -542,9 +602,11 @@ async def process_text_dialogue(
         
     except json.JSONDecodeError as e:
         logger.error(f"JSON 解析錯誤: {e}")
+        logger.error(f"詳細錯誤堆疊: {traceback.format_exc()}")
         raise HTTPException(status_code=400, detail=f"無效的 JSON 格式: {str(e)}")
     except Exception as e:
         logger.error(f"處理文本對話請求時出錯: {e}", exc_info=True)
+        logger.error(f"詳細錯誤堆疊: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"處理請求時發生錯誤: {str(e)}")
 
 @app.post("/api/dialogue/audio", response_model=DialogueResponse)
@@ -731,6 +793,51 @@ def create_dialogue_manager(character: Character, log_dir: str = "logs/api") -> 
     except Exception as e:
         logger.error(f"創建對話管理器失敗: {e}", exc_info=True)
         raise
+
+@app.post("/api/dialogue/select_response")
+async def select_response(request: SelectResponseRequest):
+    """處理患者選擇的回應
+    
+    Args:
+        request: 包含會話ID和選擇的回應
+        
+    Returns:
+        成功或失敗的狀態
+    """
+    logger.debug(f"處理選擇回應請求: session_id={request.session_id}, selected_response='{request.selected_response}'")
+    
+    # 檢查會話是否存在
+    if request.session_id not in session_store:
+        logger.error(f"找不到指定的會話: {request.session_id}")
+        raise HTTPException(status_code=404, detail="找不到指定的會話")
+    
+    # 獲取會話
+    session = session_store[request.session_id]
+    
+    # 更新會話活動時間
+    session["last_activity"] = asyncio.get_event_loop().time()
+    
+    try:
+        # 將選擇的回應添加到對話歷史
+        dialogue_manager = session["dialogue_manager"]
+        
+        # 記錄到對話歷史（假設最後一輪對話還沒有回應）
+        dialogue_manager.conversation_history.append(f"{dialogue_manager.character.name}: {request.selected_response}")
+        
+        # 記錄選擇的回應
+        dialogue_manager.log_interaction(
+            user_input="",  # 空，因為這只是回應選擇
+            response_options=[],  # 空，因為選項已經在之前的請求中記錄
+            selected_response=request.selected_response
+        )
+        dialogue_manager.save_interaction_log()
+        
+        logger.debug(f"成功記錄選擇的回應: {request.selected_response}")
+        return {"status": "success", "message": "回應選擇已記錄"}
+    
+    except Exception as e:
+        logger.error(f"處理選擇回應時出錯: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"處理選擇回應時出錯: {str(e)}")
 
 # 如果直接運行此模塊，啟動服務器
 if __name__ == "__main__":

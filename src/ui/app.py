@@ -6,6 +6,8 @@ import json
 import logging
 import sys
 import inspect
+import codecs
+import io
 from typing import List, Dict, Any, Tuple, Optional
 
 from .client import ApiClient
@@ -16,15 +18,43 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 log_file_path = os.path.join(project_root, 'ui_debug.log')
 
-# 設置日誌記錄
+# 自定義 StreamHandler 來處理 Windows 控制台編碼問題
+class SafeStreamHandler(logging.StreamHandler):
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            # 安全輸出，捕獲任何編碼錯誤
+            try:
+                stream.write(msg + self.terminator)
+            except UnicodeEncodeError:
+                # 對於 Windows 控制台，移除不能顯示的字符或使用替代字符
+                safe_msg = "".join(c if ord(c) < 128 else '?' for c in msg)
+                stream.write(safe_msg + self.terminator)
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+# 設置日誌記錄，修改為支持 UTF-8 編碼
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(log_file_path, mode='w')  # Use 'w' mode to overwrite the file each time
+        # 只使用文件處理器，避免控制台輸出的編碼問題
+        logging.FileHandler(log_file_path, mode='w', encoding='utf-8')  # 使用 utf-8 編碼
     ]
 )
+
+# 添加安全控制台處理器
+console_handler = SafeStreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+# 獲取根日誌記錄器並添加處理器
+root_logger = logging.getLogger()
+root_logger.addHandler(console_handler)
+
+# 應用模組日誌記錄器
 logger = logging.getLogger(__name__)
 
 # Log some debug info at startup
@@ -32,6 +62,7 @@ logger.info(f"Starting UI application")
 logger.info(f"Log file path: {log_file_path}")
 logger.info(f"Current directory: {current_dir}")
 logger.info(f"Project root: {project_root}")
+logger.info(f"System encoding: {sys.stdout.encoding}")
 
 def log_function_call(func):
     """Function decorator for logging purposes"""
@@ -232,9 +263,21 @@ class DialogueApp:
                 if not text.strip():
                     return "", history, sess_id, []
                 
-                # 更新 API 客戶端設置
-                self.api_client.set_character(char_id, config)
-                if sess_id:
+                logger.info(f"开始处理文本输入，现有会话ID: {sess_id}")
+                
+                # 更新 API 客戶端設置 - 但不要重置会话ID
+                if self.api_client.character_id != char_id or self.api_client.character_config != config:
+                    logger.info(f"角色已变更，设置新角色但保留现有会话ID: {sess_id}")
+                    # 保存现有会话ID
+                    current_session_id = self.api_client.session_id
+                    # 设置新角色
+                    self.api_client.set_character(char_id, config)
+                    # 恢复会话ID
+                    self.api_client.session_id = current_session_id or sess_id
+                
+                # 确保会话ID一致
+                if sess_id and self.api_client.session_id != sess_id:
+                    logger.info(f"同步客户端会话ID: 从{self.api_client.session_id}到{sess_id}")
                     self.api_client.session_id = sess_id
                 
                 # 添加用戶輸入到聊天歷史
@@ -244,16 +287,24 @@ class DialogueApp:
                 text_chatbot.value = history
                 
                 # 發送請求
-                logger.info(f"發送文本: {text}")
+                logger.info(f"发送文本: {text}, 会话ID: {self.api_client.session_id}")
                 response = self.api_client.send_text_message(text, "text")
-                logger.info(f"收到回應: {response}")
+                logger.info(f"收到回应: {response}")
                 
                 # 處理文本回應
                 if "responses" in response and response["responses"]:
                     # 更新會話 ID
                     if "session_id" in response:
                         sess_id = response["session_id"]
-                        logger.debug(f"更新會話 ID: {sess_id}")
+                        self.api_client.session_id = sess_id  # 确保同步客户端的会话ID
+                        logger.info(f"更新会话ID: {sess_id}")
+                        
+                        # 重要：让所有组件更新会话ID
+                        session_id_text.value = sess_id
+                    
+                    # 記錄對話歷史和會話ID供除錯用途
+                    logger.info(f"当前完整对话历史: {history}")
+                    logger.info(f"API客户端会话ID: {self.api_client.session_id}")
                     
                     # 檢查是否為 CONFUSED 狀態
                     if "state" in response and response["state"] == "CONFUSED":
@@ -429,7 +480,10 @@ class DialogueApp:
                     
                     # Add debugging for current chatbot state
                     logger.info(f"當前對話歷史: {text_chatbot.value}")
-                    logger.info(f"當前會話ID: {session_id_text.value}")
+                    
+                    # 获取会话ID - 检查两个来源确保一致性
+                    current_session_id = session_id_text.value or self.api_client.session_id
+                    logger.info(f"當前會話ID: {current_session_id}")
                     
                     # Update the chat history directly
                     history = text_chatbot.value.copy() if text_chatbot.value else []
@@ -462,18 +516,39 @@ class DialogueApp:
                     text_chatbot.value = history
                     
                     # Try to send the selected response to the server
-                    if session_id_text.value:
+                    if current_session_id:
                         try:
-                            logger.info(f"Sending response to server: {response_text}")
-                            self.api_client.update_selected_response(session_id_text.value, response_text)
-                            logger.info("Successfully sent response to server")
+                            logger.info(f"Sending response to server: {response_text}, Session ID: {current_session_id}")
+                            # 确保客户端会话ID与UI组件中的会话ID同步
+                            if self.api_client.session_id != current_session_id:
+                                logger.info(f"Synchronizing client session ID from {self.api_client.session_id} to {current_session_id}")
+                                self.api_client.session_id = current_session_id
+                            
+                            # 更新会话ID组件
+                            session_id_text.value = current_session_id
+                            
+                            # 发送选择的回应，并检查是否成功
+                            success = self.api_client.update_selected_response(current_session_id, response_text)
+                            if success:
+                                logger.info("Successfully sent response to server")
+                            else:
+                                logger.error("Failed to send response to server")
+                                # 尝试重新发送
+                                logger.info("Retrying...")
+                                success = self.api_client.update_selected_response(current_session_id, response_text)
+                                if success:
+                                    logger.info("Successfully sent response to server on retry")
+                                else:
+                                    logger.error("Failed to send response to server after retry")
                         except Exception as e:
                             logger.error(f"Error sending response to server: {e}", exc_info=True)
                     else:
                         logger.warning("No session ID available, cannot send to server")
                     
+                    # 清空回應選項
+                    response_box.visible = False
                     # Return the updated history and clear response options
-                    return history, session_id_text.value, []
+                    return history, current_session_id, []
                 except Exception as e:
                     logger.error(f"Error in handle_btn1_click: {e}", exc_info=True)
                     return text_chatbot.value, session_id_text.value, []
@@ -527,14 +602,32 @@ class DialogueApp:
                     # Try to send the selected response to the server
                     if session_id_text.value:
                         try:
-                            logger.info(f"Sending response to server: {response_text}")
-                            self.api_client.update_selected_response(session_id_text.value, response_text)
-                            logger.info("Successfully sent response to server")
+                            logger.info(f"Sending response to server: {response_text}, Session ID: {session_id_text.value}")
+                            # 确保客户端会话ID与UI组件中的会话ID同步
+                            if self.api_client.session_id != session_id_text.value:
+                                logger.info(f"Synchronizing client session ID from {self.api_client.session_id} to {session_id_text.value}")
+                                self.api_client.session_id = session_id_text.value
+                            
+                            # 发送选择的回应，并检查是否成功
+                            success = self.api_client.update_selected_response(session_id_text.value, response_text)
+                            if success:
+                                logger.info("Successfully sent response to server")
+                            else:
+                                logger.error("Failed to send response to server")
+                                # 尝试重新发送
+                                logger.info("Retrying...")
+                                success = self.api_client.update_selected_response(session_id_text.value, response_text)
+                                if success:
+                                    logger.info("Successfully sent response to server on retry")
+                                else:
+                                    logger.error("Failed to send response to server after retry")
                         except Exception as e:
                             logger.error(f"Error sending response to server: {e}", exc_info=True)
                     else:
                         logger.warning("No session ID available, cannot send to server")
                     
+                    # 清空回應選項
+                    response_box.visible = False
                     # Return the updated history and clear response options
                     return history, session_id_text.value, []
                 except Exception as e:
@@ -579,14 +672,32 @@ class DialogueApp:
                     # Try to send the selected response to the server
                     if session_id_text.value:
                         try:
-                            logger.info(f"Sending response to server: {response_text}")
-                            self.api_client.update_selected_response(session_id_text.value, response_text)
-                            logger.info("Successfully sent response to server")
+                            logger.info(f"Sending response to server: {response_text}, Session ID: {session_id_text.value}")
+                            # 确保客户端会话ID与UI组件中的会话ID同步
+                            if self.api_client.session_id != session_id_text.value:
+                                logger.info(f"Synchronizing client session ID from {self.api_client.session_id} to {session_id_text.value}")
+                                self.api_client.session_id = session_id_text.value
+                            
+                            # 发送选择的回应，并检查是否成功
+                            success = self.api_client.update_selected_response(session_id_text.value, response_text)
+                            if success:
+                                logger.info("Successfully sent response to server")
+                            else:
+                                logger.error("Failed to send response to server")
+                                # 尝试重新发送
+                                logger.info("Retrying...")
+                                success = self.api_client.update_selected_response(session_id_text.value, response_text)
+                                if success:
+                                    logger.info("Successfully sent response to server on retry")
+                                else:
+                                    logger.error("Failed to send response to server after retry")
                         except Exception as e:
                             logger.error(f"Error sending response to server: {e}", exc_info=True)
                     else:
                         logger.warning("No session ID available, cannot send to server")
                     
+                    # 清空回應選項
+                    response_box.visible = False
                     return history, session_id_text.value, []
                 except Exception as e:
                     logger.error(f"Error in handle_btn3_click: {e}", exc_info=True)
@@ -630,14 +741,32 @@ class DialogueApp:
                     # Try to send the selected response to the server
                     if session_id_text.value:
                         try:
-                            logger.info(f"Sending response to server: {response_text}")
-                            self.api_client.update_selected_response(session_id_text.value, response_text)
-                            logger.info("Successfully sent response to server")
+                            logger.info(f"Sending response to server: {response_text}, Session ID: {session_id_text.value}")
+                            # 确保客户端会话ID与UI组件中的会话ID同步
+                            if self.api_client.session_id != session_id_text.value:
+                                logger.info(f"Synchronizing client session ID from {self.api_client.session_id} to {session_id_text.value}")
+                                self.api_client.session_id = session_id_text.value
+                            
+                            # 发送选择的回应，并检查是否成功
+                            success = self.api_client.update_selected_response(session_id_text.value, response_text)
+                            if success:
+                                logger.info("Successfully sent response to server")
+                            else:
+                                logger.error("Failed to send response to server")
+                                # 尝试重新发送
+                                logger.info("Retrying...")
+                                success = self.api_client.update_selected_response(session_id_text.value, response_text)
+                                if success:
+                                    logger.info("Successfully sent response to server on retry")
+                                else:
+                                    logger.error("Failed to send response to server after retry")
                         except Exception as e:
                             logger.error(f"Error sending response to server: {e}", exc_info=True)
                     else:
                         logger.warning("No session ID available, cannot send to server")
                     
+                    # 清空回應選項
+                    response_box.visible = False
                     return history, session_id_text.value, []
                 except Exception as e:
                     logger.error(f"Error in handle_btn4_click: {e}", exc_info=True)
@@ -681,14 +810,32 @@ class DialogueApp:
                     # Try to send the selected response to the server
                     if session_id_text.value:
                         try:
-                            logger.info(f"Sending response to server: {response_text}")
-                            self.api_client.update_selected_response(session_id_text.value, response_text)
-                            logger.info("Successfully sent response to server")
+                            logger.info(f"Sending response to server: {response_text}, Session ID: {session_id_text.value}")
+                            # 确保客户端会话ID与UI组件中的会话ID同步
+                            if self.api_client.session_id != session_id_text.value:
+                                logger.info(f"Synchronizing client session ID from {self.api_client.session_id} to {session_id_text.value}")
+                                self.api_client.session_id = session_id_text.value
+                            
+                            # 发送选择的回应，并检查是否成功
+                            success = self.api_client.update_selected_response(session_id_text.value, response_text)
+                            if success:
+                                logger.info("Successfully sent response to server")
+                            else:
+                                logger.error("Failed to send response to server")
+                                # 尝试重新发送
+                                logger.info("Retrying...")
+                                success = self.api_client.update_selected_response(session_id_text.value, response_text)
+                                if success:
+                                    logger.info("Successfully sent response to server on retry")
+                                else:
+                                    logger.error("Failed to send response to server after retry")
                         except Exception as e:
                             logger.error(f"Error sending response to server: {e}", exc_info=True)
                     else:
                         logger.warning("No session ID available, cannot send to server")
                     
+                    # 清空回應選項
+                    response_box.visible = False
                     return history, session_id_text.value, []
                 except Exception as e:
                     logger.error(f"Error in handle_btn5_click: {e}", exc_info=True)
