@@ -380,12 +380,18 @@ async def process_text_dialogue(
             raise HTTPException(status_code=400, detail="必須提供 character_id 參數")
         
         # 手動獲取或創建會話
-        session = await get_or_create_session(
-            request=request,
-            session_id=session_id,
-            character_id=character_id,
-            character_config=character_config  # 傳遞客戶端提供的角色配置
-        )
+        try:
+            session = await get_or_create_session(
+                request=request,
+                session_id=session_id,
+                character_id=character_id,
+                character_config=character_config  # 傳遞客戶端提供的角色配置
+            )
+        except Exception as e:
+            import traceback
+            logger.error(f"獲取或創建會話失敗: {e}")
+            logger.error(f"堆棧跟踪: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"獲取或創建會話失敗: {str(e)}\n\n堆棧跟踪: {traceback.format_exc()}")
         
         # 更新會話活動時間
         session["last_activity"] = asyncio.get_event_loop().time()
@@ -601,4 +607,17 @@ def create_dialogue_manager(character: Character, log_dir: str = "logs/api") -> 
 
 # 如果直接運行此模塊，啟動服務器
 if __name__ == "__main__":
+    # 啟動前清理角色和會話緩存
+    character_cache.clear()
+    session_store.clear()
+    logger.info("已清理角色和會話緩存，啟動服務器...")
+    
+    # 打印所有已加載的角色
+    try:
+        characters = list_available_characters()
+        logger.info(f"已加載角色: {list(characters.keys())}")
+    except Exception as e:
+        logger.error(f"加載角色列表失敗: {e}")
+    
+    # 啟動服務器
     uvicorn.run("src.api.server:app", host="0.0.0.0", port=8000, reload=True) 
