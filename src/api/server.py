@@ -176,11 +176,17 @@ async def get_or_create_session(
     logger.debug(f"創建新會話: {new_session_id}")
     
     # 創建對話管理器
-    dialogue_manager = DialogueManager(
-        character=character_cache[character_id],
-        use_terminal=False,
-        log_dir="logs/api"
-    )
+    try:
+        dialogue_manager = create_dialogue_manager(
+            character=character_cache[character_id],
+            log_dir="logs/api"
+        )
+    except Exception as e:
+        logger.error(f"創建對話管理器失敗: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"創建對話管理器失敗: {str(e)}"
+        )
     
     # 存儲會話數據
     session_store[new_session_id] = {
@@ -568,6 +574,30 @@ def dummy_tts(text, voice_id="default"):
     logger.debug(f"已生成語音文件: {temp_file_path}")
     
     return temp_file_path
+
+# 添加一個新函數創建對話管理器，並添加詳細日誌記錄
+def create_dialogue_manager(character: Character, log_dir: str = "logs/api") -> DialogueManager:
+    """創建對話管理器並添加詳細日誌記錄
+    
+    Args:
+        character: 角色對象
+        log_dir: 日誌目錄
+    
+    Returns:
+        DialogueManager 實例
+    """
+    logger.debug(f"創建對話管理器，角色: {character.name}, 類型: {type(character)}, 屬性: {dir(character)}")
+    try:
+        manager = DialogueManager(
+            character=character,
+            use_terminal=False,
+            log_dir=log_dir
+        )
+        logger.debug(f"成功創建對話管理器: {type(manager)}")
+        return manager
+    except Exception as e:
+        logger.error(f"創建對話管理器失敗: {e}", exc_info=True)
+        raise
 
 # 如果直接運行此模塊，啟動服務器
 if __name__ == "__main__":
