@@ -377,26 +377,56 @@ async def process_text_dialogue(
         if not character_id:
             raise HTTPException(status_code=400, detail="必須提供 character_id 參數")
         
-        # 手動獲取或創建會話
-        try:
-            session = await get_or_create_session(
-                request=request,
-                session_id=session_id,
-                character_id=character_id,
-                character_config=character_config  # 傳遞客戶端提供的角色配置
-            )
-        except Exception as e:
-            import traceback
-            logger.error(f"獲取或創建會話失敗: {e}")
-            logger.error(f"堆棧跟踪: {traceback.format_exc()}")
-            raise HTTPException(status_code=500, detail=f"獲取或創建會話失敗: {str(e)}\n\n堆棧跟踪: {traceback.format_exc()}")
+        # 臨時解決方案：如果提供了 session_id 但不在 session_store 中，返回錯誤
+        if session_id and session_id not in session_store:
+            raise HTTPException(status_code=404, detail="找不到指定的會話，請創建新會話")
         
-        # 更新會話活動時間
-        session["last_activity"] = asyncio.get_event_loop().time()
+        # 如果有會話 ID，使用現有會話
+        if session_id and session_id in session_store:
+            session = session_store[session_id]
+            # 更新會話活動時間
+            session["last_activity"] = asyncio.get_event_loop().time()
+        else:
+            # 創建新會話 - 這裡避免使用自定義角色配置，而是使用固定的預設值
+            logger.info(f"使用預設值創建新角色: {character_id}")
+            
+            # 創建基本角色
+            character = Character(
+                name=f"Patient_{character_id}",
+                persona="病患角色",
+                backstory="此為系統創建的預設角色。",
+                goal="與醫護人員交流",
+                details=None
+            )
+            
+            # 創建對話管理器
+            try:
+                dialogue_manager = DialogueManager(character)
+                logger.debug(f"成功創建對話管理器")
+            except Exception as e:
+                logger.error(f"創建對話管理器失敗: {e}", exc_info=True)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"創建對話管理器失敗: {str(e)}"
+                )
+            
+            # 創建新會話ID
+            new_session_id = str(uuid.uuid4())
+            logger.debug(f"創建新會話: {new_session_id}")
+            
+            # 存儲會話數據
+            session_store[new_session_id] = {
+                "dialogue_manager": dialogue_manager,
+                "character_id": character_id,
+                "created_at": asyncio.get_event_loop().time(),
+                "last_activity": asyncio.get_event_loop().time(),
+            }
+            
+            session = session_store[new_session_id]
+            session_id = new_session_id
         
         # 在調用對話管理器前添加診斷信息
         logger.debug(f"使用的角色信息: id={character_id}, name={session['dialogue_manager'].character.name}")
-        logger.debug(f"角色詳情: {vars(session['dialogue_manager'].character)}")
         
         # 調用對話管理器處理用戶輸入
         dialogue_manager = session["dialogue_manager"]
