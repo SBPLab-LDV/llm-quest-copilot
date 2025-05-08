@@ -9,6 +9,7 @@ from .prompt_manager import PromptManager
 import keyboard
 import datetime  # 導入 datetime 模組
 import os # 導入 os 模組，用於檔案路徑操作
+import logging
 
 class DialogueManager:
     def __init__(self, character: Character, use_terminal: bool = False, log_dir: str = "logs"):
@@ -19,6 +20,11 @@ class DialogueManager:
             use_terminal: Whether to use terminal mode for interaction
             log_dir: Directory to save interaction logs
         """
+        # 打印診斷信息
+        logger = logging.getLogger(__name__)
+        logger.debug(f"DialogueManager.__init__ 被調用，參數: character={character}, use_terminal={use_terminal}, log_dir={log_dir}")
+        logger.debug(f"參數類型: character={type(character)}, use_terminal={type(use_terminal)}, log_dir={type(log_dir)}")
+        
         self.character = character
         self.current_state = DialogueState.NORMAL
         self.conversation_history = []
