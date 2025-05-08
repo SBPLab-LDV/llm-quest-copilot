@@ -17,6 +17,7 @@ import sys
 import codecs
 from dataclasses import asdict
 
+
 import numpy as np
 from scipy.io import wavfile
 
@@ -838,6 +839,7 @@ async def select_response(request: SelectResponseRequest):
     except Exception as e:
         logger.error(f"處理選擇回應時出錯: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"處理選擇回應時出錯: {str(e)}")
+
 
 # 如果直接運行此模塊，啟動服務器
 if __name__ == "__main__":
