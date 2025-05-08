@@ -589,14 +589,41 @@ def create_dialogue_manager(character: Character, log_dir: str = "logs/api") -> 
         DialogueManager 實例
     """
     logger.debug(f"創建對話管理器，角色: {character.name}, 類型: {type(character)}, 屬性: {dir(character)}")
+    
+    # 檢查 DialogueManager 的構造函數
+    import inspect
+    logger.debug(f"DialogueManager.__init__ 簽名: {inspect.signature(DialogueManager.__init__)}")
+    
     try:
-        manager = DialogueManager(
-            character=character,
-            use_terminal=False,
-            log_dir=log_dir
-        )
-        logger.debug(f"成功創建對話管理器: {type(manager)}")
-        return manager
+        logger.debug(f"嘗試使用以下參數創建 DialogueManager: character={character}, use_terminal=False, log_dir={log_dir}")
+        logger.debug(f"DialogueManager 參數類型: character={type(character)}, use_terminal={type(False)}, log_dir={type(log_dir)}")
+        
+        # 嘗試使用字典解包方式
+        params = {
+            "character": character,
+            "use_terminal": False,
+            "log_dir": log_dir
+        }
+        logger.debug(f"使用字典解包方式: {params}")
+        
+        try:
+            # 方法1: 使用原始方式
+            manager = DialogueManager(character, use_terminal=False, log_dir=log_dir)
+            logger.debug("方法1成功創建對話管理器")
+            return manager
+        except Exception as e1:
+            logger.error(f"方法1失敗: {e1}")
+            try:
+                # 方法2: 使用字典解包
+                manager = DialogueManager(**params)
+                logger.debug("方法2成功創建對話管理器")
+                return manager
+            except Exception as e2:
+                logger.error(f"方法2失敗: {e2}")
+                # 方法3: 嘗試位置參數
+                manager = DialogueManager(character, False, log_dir)
+                logger.debug("方法3成功創建對話管理器")
+                return manager
     except Exception as e:
         logger.error(f"創建對話管理器失敗: {e}", exc_info=True)
         raise
