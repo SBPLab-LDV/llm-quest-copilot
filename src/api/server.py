@@ -207,38 +207,28 @@ def create_character(character_id: str) -> Character:
     except Exception as e:
         logger.warning(f"從配置加載角色失敗: {e}，嘗試手動創建")
         
-        # 回退到手動創建（與原有代碼相同）
-        try:
-            # 嘗試使用命名參數
-            return Character(
-                identifier=character_id,
-                name=f"Patient_{character_id}",
-                age=50,
-                background="Sample background",
-                persona="一般病患",
-                goal="與護理人員交流"
-            )
-        except TypeError:
-            try:
-                # 嘗試使用不同的參數名稱
-                return Character(
-                    character_id=character_id,
-                    name=f"Patient_{character_id}",
-                    age=50,
-                    background="Sample background",
-                    persona="一般病患",
-                    goal="與護理人員交流"
-                )
-            except TypeError:
-                # 嘗試使用位置參數
-                return Character(
-                    character_id,
-                    f"Patient_{character_id}",
-                    50,
-                    "Sample background",
-                    "一般病患",
-                    "與護理人員交流"
-                )
+        # 回退到手動創建
+        # 直接使用匹配 Character 類定義的參數
+        fallback_data = {
+            "name": f"Patient_{character_id}",
+            "persona": "一般病患",
+            "backstory": "Sample background",
+            "goal": "與護理人員交流",
+            "details": {
+                "fixed_settings": {
+                    "流水編號": character_id,
+                    "年齡": 50,
+                    "性別": "未指定"
+                },
+                "floating_settings": {
+                    "目前接受治療場所": "醫院",
+                    "關鍵字": "一般情況"
+                }
+            }
+        }
+        
+        # 使用 from_yaml 方法創建 Character 物件
+        return Character.from_yaml(fallback_data)
 
 # 語音轉文本函數
 async def speech_to_text(audio_file: UploadFile) -> str:
