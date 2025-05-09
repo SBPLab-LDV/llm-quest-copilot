@@ -131,7 +131,9 @@ class GeminiClient:
             如果完全聽不清或無法識別，請回覆包含「無法識別錄音內容」的 JSON。
             如果是背景噪音或沒有語音，請回覆包含「錄音中沒有清晰的語音」的 JSON。
 
-            請只返回 JSON 格式的回應，不要包含任何額外解釋或討論。
+            請直接返回正確的 JSON 格式，不要包含任何額外解釋、markdown 標記或代碼塊標記。
+            例如：
+            {"original": "我...頭痛...", "options": ["我感到頭痛", "我有頭痛症狀", "我的頭很痛"]}
             """
             
             # 按照 genai 庫要求的格式準備多模態內容
@@ -168,10 +170,19 @@ class GeminiClient:
             self.logger.info(f"===== 音頻識別完成 =====")
             self.logger.debug(f"識別結果: '{result_text[:100]}...'")
             
+            # 清理結果文本中可能包含的markdown代碼塊標記
+            # 移除可能的代碼塊標記 ```json 和 ```
+            cleaned_text = result_text
+            if cleaned_text.startswith('```json'):
+                cleaned_text = cleaned_text[7:]
+            if cleaned_text.endswith('```'):
+                cleaned_text = cleaned_text[:-3]
+            cleaned_text = cleaned_text.strip()
+            
             # 驗證 JSON 格式
             try:
                 # 嘗試解析回應為 JSON
-                json_result = json.loads(result_text)
+                json_result = json.loads(cleaned_text)
                 
                 # 確保有必要的字段
                 if "original" not in json_result or "options" not in json_result:
@@ -187,8 +198,8 @@ class GeminiClient:
                         "options": [original]
                     })
                 
-                # 格式正確，返回原始 JSON 字符串
-                return result_text
+                # 格式正確，返回格式化的 JSON 字符串
+                return json.dumps(json_result)
             except json.JSONDecodeError:
                 # 不是 JSON 格式，將其轉換為正確的格式
                 self.logger.warning(f"回應不是 JSON 格式: {result_text}")

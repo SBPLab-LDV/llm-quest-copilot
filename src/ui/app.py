@@ -105,14 +105,14 @@ class DialogueApp:
             theme=gr.themes.Soft(), 
             title="醫護對話系統",
             css="""
-            #response_box {
-                border: 1px solid rgba(25, 118, 210, 0.3) !important; 
+            #response_box, #audio_response_box {
+                border: 1px solid rgba(128, 128, 128, 0.2) !important; 
                 border-radius: 8px !important;
                 padding: 10px !important;
                 margin-top: 15px !important;
-                background-color: transparent !important;
+                background-color: rgba(247, 247, 248, 0.7) !important;
             }
-            #response_box button {
+            #response_box button, #audio_response_box button {
                 margin: 5px !important;
                 text-align: left !important;
             }
@@ -428,7 +428,6 @@ class DialogueApp:
                         return "", history, sess_id, response_options_list
                 else:
                     # 處理錯誤
-                    logger.warning(f"API 回應中沒有找到回應選項或回應選項為空: {response}")
                     history[-1][1] = "發生錯誤，無法獲取回應。"
                     text_chatbot.value = history  # 更新UI显示错误信息
                     # 隱藏回應選項
@@ -533,10 +532,22 @@ class DialogueApp:
                 return history, session_id, []
                 
             # 更新語音按鈕顯示
+            @log_function_call
             def update_audio_buttons(options):
                 """更新語音選項按鈕顯示"""
+                logger.info(f"更新語音按鈕顯示: {options}")
+                
                 if not options or len(options) == 0:
-                    # 隱藏所有按鈕
+                    logger.info("沒有語音選項，隱藏所有按鈕")
+                    # 直接更新組件可見性
+                    audio_response_box.visible = False
+                    audio_btn1.visible = False
+                    audio_btn2.visible = False
+                    audio_btn3.visible = False
+                    audio_btn4.visible = False
+                    audio_btn5.visible = False
+                    
+                    # 返回更新
                     return [
                         gr.update(visible=False),
                         gr.update(visible=False, value="選項1"),
@@ -546,6 +557,11 @@ class DialogueApp:
                         gr.update(visible=False, value="選項5")
                     ]
                 
+                logger.info(f"顯示 {len(options)} 個語音選項按鈕")
+                
+                # 強制更新容器可見性
+                audio_response_box.visible = True
+                
                 # 顯示選項按鈕
                 updates = [gr.update(visible=True)]
                 
@@ -554,11 +570,40 @@ class DialogueApp:
                     if i < len(options):
                         btn_text = f"{i+1}. {options[i]}"
                         updates.append(gr.update(visible=True, value=btn_text))
+                        
+                        # 直接設置按鈕可見性和文字
+                        if i == 0:
+                            audio_btn1.visible = True
+                            audio_btn1.value = btn_text
+                        elif i == 1:
+                            audio_btn2.visible = True
+                            audio_btn2.value = btn_text
+                        elif i == 2:
+                            audio_btn3.visible = True
+                            audio_btn3.value = btn_text
+                        elif i == 3:
+                            audio_btn4.visible = True
+                            audio_btn4.value = btn_text
+                        elif i == 4:
+                            audio_btn5.visible = True
+                            audio_btn5.value = btn_text
                     else:
                         updates.append(gr.update(visible=False, value=f"選項{i+1}"))
+                        
+                        # 直接隱藏不需要的按鈕
+                        if i == 0:
+                            audio_btn1.visible = False
+                        elif i == 1:
+                            audio_btn2.visible = False
+                        elif i == 2:
+                            audio_btn3.visible = False
+                        elif i == 3:
+                            audio_btn4.visible = False
+                        elif i == 4:
+                            audio_btn5.visible = False
                 
                 return updates
-                
+            
             def update_text_character(char_name, use_custom, name, persona, backstory, goal, fixed, floating):
                 """更新文本對話角色選擇"""
                 if use_custom:
@@ -618,13 +663,36 @@ class DialogueApp:
                 outputs=[audio_response_box, audio_btn1, audio_btn2, audio_btn3, audio_btn4, audio_btn5]
             )
             
+            # 定義一個專門用於隱藏選項的函數
+            @log_function_call
+            def hide_audio_options():
+                """隱藏所有音頻選項按鈕"""
+                logger.info("隱藏所有音頻選項按鈕")
+                # 直接更新組件可見性
+                audio_response_box.visible = False
+                audio_btn1.visible = False
+                audio_btn2.visible = False
+                audio_btn3.visible = False
+                audio_btn4.visible = False
+                audio_btn5.visible = False
+                
+                # 返回更新字典格式
+                return [
+                    gr.update(visible=False),
+                    gr.update(visible=False),
+                    gr.update(visible=False),
+                    gr.update(visible=False),
+                    gr.update(visible=False),
+                    gr.update(visible=False)
+                ]
+            
             # 設置語音選項按鈕點擊事件
             audio_btn1.click(
                 fn=handle_audio_option_click,
                 inputs=[audio_btn1, audio_chatbot, session_id_audio],
                 outputs=[audio_chatbot, session_id_audio, response_options]
             ).then(
-                fn=lambda: [gr.update(visible=False)] + [gr.update(visible=False)] * 5,
+                fn=hide_audio_options,
                 outputs=[audio_response_box, audio_btn1, audio_btn2, audio_btn3, audio_btn4, audio_btn5]
             )
             
@@ -633,7 +701,7 @@ class DialogueApp:
                 inputs=[audio_btn2, audio_chatbot, session_id_audio],
                 outputs=[audio_chatbot, session_id_audio, response_options]
             ).then(
-                fn=lambda: [gr.update(visible=False)] + [gr.update(visible=False)] * 5,
+                fn=hide_audio_options,
                 outputs=[audio_response_box, audio_btn1, audio_btn2, audio_btn3, audio_btn4, audio_btn5]
             )
             
@@ -642,7 +710,7 @@ class DialogueApp:
                 inputs=[audio_btn3, audio_chatbot, session_id_audio],
                 outputs=[audio_chatbot, session_id_audio, response_options]
             ).then(
-                fn=lambda: [gr.update(visible=False)] + [gr.update(visible=False)] * 5,
+                fn=hide_audio_options,
                 outputs=[audio_response_box, audio_btn1, audio_btn2, audio_btn3, audio_btn4, audio_btn5]
             )
             
@@ -651,7 +719,7 @@ class DialogueApp:
                 inputs=[audio_btn4, audio_chatbot, session_id_audio],
                 outputs=[audio_chatbot, session_id_audio, response_options]
             ).then(
-                fn=lambda: [gr.update(visible=False)] + [gr.update(visible=False)] * 5,
+                fn=hide_audio_options,
                 outputs=[audio_response_box, audio_btn1, audio_btn2, audio_btn3, audio_btn4, audio_btn5]
             )
             
@@ -660,8 +728,30 @@ class DialogueApp:
                 inputs=[audio_btn5, audio_chatbot, session_id_audio],
                 outputs=[audio_chatbot, session_id_audio, response_options]
             ).then(
-                fn=lambda: [gr.update(visible=False)] + [gr.update(visible=False)] * 5,
+                fn=hide_audio_options,
                 outputs=[audio_response_box, audio_btn1, audio_btn2, audio_btn3, audio_btn4, audio_btn5]
+            )
+            
+            audio_reset_btn.click(
+                fn=handle_reset_audio,
+                inputs=[],
+                outputs=[audio_chatbot, session_id_audio, response_options]
+            )
+            
+            # 更新語音對話角色選擇
+            audio_selector.change(
+                fn=update_audio_character,
+                inputs=[
+                    audio_selector,
+                    audio_custom_char["use_custom_config"],
+                    audio_custom_char["name"],
+                    audio_custom_char["persona"],
+                    audio_custom_char["backstory"],
+                    audio_custom_char["goal"],
+                    audio_custom_char["fixed_settings"],
+                    audio_custom_char["floating_settings"]
+                ],
+                outputs=[character_id, session_id_audio, custom_config]
             )
             
             # 設置文本對話事件處理
@@ -689,87 +779,6 @@ class DialogueApp:
                 fn=handle_reset_text,
                 inputs=[],
                 outputs=[text_chatbot, session_id_text, response_options]
-            )
-            
-            # 更新文本對話角色選擇
-            text_selector.change(
-                fn=update_text_character,
-                inputs=[
-                    text_selector,
-                    text_custom_char["use_custom_config"],
-                    text_custom_char["name"],
-                    text_custom_char["persona"],
-                    text_custom_char["backstory"],
-                    text_custom_char["goal"],
-                    text_custom_char["fixed_settings"],
-                    text_custom_char["floating_settings"]
-                ],
-                outputs=[character_id, session_id_text, custom_config]
-            )
-            
-            # 當自定義配置變更時重新生成配置
-            text_custom_char["use_custom_config"].change(
-                fn=update_text_character,
-                inputs=[
-                    text_selector,
-                    text_custom_char["use_custom_config"],
-                    text_custom_char["name"],
-                    text_custom_char["persona"],
-                    text_custom_char["backstory"],
-                    text_custom_char["goal"],
-                    text_custom_char["fixed_settings"],
-                    text_custom_char["floating_settings"]
-                ],
-                outputs=[character_id, session_id_text, custom_config]
-            )
-            
-            # Add debug function for UI state
-            @log_function_call
-            def debug_component_states():
-                """Debug function to print the current states of components"""
-                logger.info("=== DEBUG COMPONENT STATES ===")
-                logger.info(f"Response Box visible: {response_box.visible}")
-                logger.info(f"Button 1: visible={response_btn1.visible}, value='{response_btn1.value}'")
-                logger.info(f"Button 2: visible={response_btn2.visible}, value='{response_btn2.value}'")
-                logger.info(f"Button 3: visible={response_btn3.visible}, value='{response_btn3.value}'") 
-                logger.info(f"Button 4: visible={response_btn4.visible}, value='{response_btn4.value}'")
-                logger.info(f"Button 5: visible={response_btn5.visible}, value='{response_btn5.value}'")
-                logger.info(f"Current chatbot history: {text_chatbot.value}")
-                logger.info(f"Current session ID: {session_id_text.value}")
-                logger.info("=== END DEBUG ===")
-                return None
-            
-            # 設置語音對話事件處理
-            audio_input.stop(
-                fn=handle_audio_input,
-                inputs=[audio_input, audio_chatbot, character_id, session_id_audio, custom_config],
-                outputs=[audio_chatbot, session_id_audio, response_options]
-            ).then(
-                fn=update_audio_buttons,
-                inputs=[response_options],
-                outputs=[audio_response_box, audio_btn1, audio_btn2, audio_btn3, audio_btn4, audio_btn5]
-            )
-            
-            audio_reset_btn.click(
-                fn=handle_reset_audio,
-                inputs=[],
-                outputs=[audio_chatbot, session_id_audio, response_options]
-            )
-            
-            # 更新語音對話角色選擇
-            audio_selector.change(
-                fn=update_audio_character,
-                inputs=[
-                    audio_selector,
-                    audio_custom_char["use_custom_config"],
-                    audio_custom_char["name"],
-                    audio_custom_char["persona"],
-                    audio_custom_char["backstory"],
-                    audio_custom_char["goal"],
-                    audio_custom_char["fixed_settings"],
-                    audio_custom_char["floating_settings"]
-                ],
-                outputs=[character_id, session_id_audio, custom_config]
             )
             
             # 當自定義配置變更時重新生成配置
@@ -800,7 +809,23 @@ class DialogueApp:
                 inputs=[session_id_audio],
                 outputs=[audio_session_display]
             )
-            
+                
+            # Add debug function for UI state
+            @log_function_call
+            def debug_component_states():
+                """Debug function to print the current states of components"""
+                logger.info("=== DEBUG COMPONENT STATES ===")
+                logger.info(f"Response Box visible: {response_box.visible}")
+                logger.info(f"Button 1: visible={response_btn1.visible}, value='{response_btn1.value}'")
+                logger.info(f"Button 2: visible={response_btn2.visible}, value='{response_btn2.value}'")
+                logger.info(f"Button 3: visible={response_btn3.visible}, value='{response_btn3.value}'") 
+                logger.info(f"Button 4: visible={response_btn4.visible}, value='{response_btn4.value}'")
+                logger.info(f"Button 5: visible={response_btn5.visible}, value='{response_btn5.value}'")
+                logger.info(f"Current chatbot history: {text_chatbot.value}")
+                logger.info(f"Current session ID: {session_id_text.value}")
+                logger.info("=== END DEBUG ===")
+                return None
+                
             # Add debug button for development (hidden in production)
             debug_button = gr.Button("Debug State", visible=True)
             debug_button.click(fn=debug_component_states, inputs=[], outputs=[])
