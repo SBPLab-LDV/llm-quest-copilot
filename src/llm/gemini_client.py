@@ -3,6 +3,7 @@ from ..utils.config import load_config
 import logging
 import os
 import base64
+import json
 
 class GeminiClient:
     def __init__(self):
@@ -10,7 +11,7 @@ class GeminiClient:
         genai.configure(api_key=config['google_api_key'])
         self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
         # Create a multimodal model instance for audio processing
-        self.multimodal_model = genai.GenerativeModel('gemini-2.0-pro-vision-exp')
+        self.multimodal_model = genai.GenerativeModel('gemini-2.0-flash-exp')
         self.logger = logging.getLogger(__name__)
         
     def generate_response(self, prompt: str) -> str:
@@ -76,13 +77,13 @@ class GeminiClient:
             return '{"responses": ["抱歉，我現在無法正確回應"],"state": "CONFUSED"}'
     
     def transcribe_audio(self, audio_file_path: str) -> str:
-        """將音頻文件轉換為文本
+        """將音頻文件轉換為文本，同時處理斷斷續續的語音並提供多個可能的完整句子選項
         
         Args:
             audio_file_path: 音頻文件路徑 (WAV格式)
             
         Returns:
-            識別出的文本
+            識別結果的 JSON 字符串，包含原始轉錄和多個可能完整句子選項
         """
         try:
             self.logger.info(f"===== 開始音頻轉文本 =====")
@@ -91,7 +92,10 @@ class GeminiClient:
             # 檢查文件是否存在
             if not os.path.exists(audio_file_path):
                 self.logger.error(f"音頻文件不存在: {audio_file_path}")
-                return "無法處理音頻文件：文件不存在"
+                return json.dumps({
+                    "original": "無法處理音頻文件：文件不存在",
+                    "options": ["無法處理音頻文件：文件不存在"]
+                })
             
             # 讀取音頻文件
             try:
@@ -106,18 +110,31 @@ class GeminiClient:
                     self.logger.warning(f"音頻文件過大 ({file_size:.2f} KB)，可能超過 API 限制")
             except Exception as e:
                 self.logger.error(f"讀取音頻文件失敗: {e}", exc_info=True)
-                return "無法讀取音頻文件"
+                return json.dumps({
+                    "original": "無法讀取音頻文件",
+                    "options": ["無法讀取音頻文件"]
+                })
             
-            # 構建提示詞，包括任務描述
+            # 構建專門處理病患斷斷續續語音的提示詞
             prompt = """
-            請識別這段錄音中的語音內容，輸出識別的文本。這是一段病患與醫護人員之間的對話錄音。
-            請只返回識別出的文本，不要包含任何額外解釋或格式。
-            如果聽不清或無法識別，請回覆「無法識別錄音內容」。
-            如果是背景噪音或沒有語音，請回覆「錄音中沒有清晰的語音」。
+            請仔細聆聽這段錄音。這是一位病患的語音，可能因為疾病或身體狀況而斷斷續續，無法流暢表達。
+
+            請執行以下步驟：
+            1. 首先，忠實記錄病患實際說的內容，包括停頓、重複和不完整的部分，使用省略號(...)表示停頓
+            2. 然後，基於聽到的內容，推測病患可能想表達的完整句子，提供 3-5 個不同的合理可能性
+            3. 確保所有推測都符合醫療情境下的病患可能表達的內容
+
+            將結果格式化為 JSON 格式，包含以下字段：
+            - original: 原始識別的內容，包括停頓和不完整部分
+            - options: 3-5 個推測的完整句子選項數組
+
+            如果完全聽不清或無法識別，請回覆包含「無法識別錄音內容」的 JSON。
+            如果是背景噪音或沒有語音，請回覆包含「錄音中沒有清晰的語音」的 JSON。
+
+            請只返回 JSON 格式的回應，不要包含任何額外解釋或討論。
             """
             
             # 按照 genai 庫要求的格式準備多模態內容
-            # 使用 parts 而不是過時的 type/text 格式
             content = {
                 "parts": [
                     {"text": prompt},
@@ -132,7 +149,7 @@ class GeminiClient:
             
             # 設定生成參數
             generation_config = {
-                "temperature": 0.2,  # 保持低溫度以獲得更準確的轉錄
+                "temperature": 0.4,  # 稍微提高溫度以允許多樣化的推測
                 "top_p": 0.95,
                 "top_k": 40,
                 "max_output_tokens": 1024,
@@ -147,12 +164,43 @@ class GeminiClient:
             )
             
             # 處理回應
-            transcription = response.text.strip()
+            result_text = response.text.strip()
             self.logger.info(f"===== 音頻識別完成 =====")
-            self.logger.debug(f"識別結果: '{transcription[:100]}...'")
+            self.logger.debug(f"識別結果: '{result_text[:100]}...'")
             
-            return transcription
+            # 驗證 JSON 格式
+            try:
+                # 嘗試解析回應為 JSON
+                json_result = json.loads(result_text)
+                
+                # 確保有必要的字段
+                if "original" not in json_result or "options" not in json_result:
+                    self.logger.warning(f"回應缺少必要字段: {json_result}")
+                    # 構造格式正確的回應
+                    if "original" in json_result and isinstance(json_result["original"], str):
+                        original = json_result["original"]
+                    else:
+                        original = result_text
+                    
+                    return json.dumps({
+                        "original": original,
+                        "options": [original]
+                    })
+                
+                # 格式正確，返回原始 JSON 字符串
+                return result_text
+            except json.JSONDecodeError:
+                # 不是 JSON 格式，將其轉換為正確的格式
+                self.logger.warning(f"回應不是 JSON 格式: {result_text}")
+                return json.dumps({
+                    "original": result_text,
+                    "options": [result_text]
+                })
             
         except Exception as e:
             self.logger.error(f"音頻識別失敗: {e}", exc_info=True)
-            return "音頻識別過程中發生錯誤，請重試"
+            # 返回格式正確的錯誤 JSON
+            return json.dumps({
+                "original": "音頻識別過程中發生錯誤",
+                "options": ["音頻識別過程中發生錯誤，請重試"]
+            })

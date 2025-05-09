@@ -80,7 +80,7 @@ def log_function_call(func):
 class DialogueApp:
     """對話系統應用類別"""
     
-    def __init__(self, api_url: str = "http://120.126.51.6:8000"):
+    def __init__(self, api_url: str = "http://0.0.0.0:8000"):
         """初始化對話應用
         
         Args:
@@ -101,7 +101,23 @@ class DialogueApp:
             UI 組件字典
         """
         # 創建基本界面
-        with gr.Blocks(theme=gr.themes.Soft(), title="醫護對話系統") as app:
+        with gr.Blocks(
+            theme=gr.themes.Soft(), 
+            title="醫護對話系統",
+            css="""
+            #response_box {
+                border: 1px solid rgba(25, 118, 210, 0.3) !important; 
+                border-radius: 8px !important;
+                padding: 10px !important;
+                margin-top: 15px !important;
+                background-color: transparent !important;
+            }
+            #response_box button {
+                margin: 5px !important;
+                text-align: left !important;
+            }
+            """
+        ) as app:
             gr.Markdown("# 醫護對話系統")
             gr.Markdown("使用此界面與虛擬病患進行對話。您可以選擇不同的角色進行對話。")
             
@@ -160,6 +176,17 @@ class DialogueApp:
                         with gr.Column(scale=3):
                             # 創建聊天區
                             audio_chatbot = gr.Chatbot(label="對話歷史", height=500)
+                            
+                            # 添加回應選項區域 - 確保它在語音對話標籤中
+                            with gr.Column(visible=False, elem_id="audio_response_box") as audio_response_box:
+                                gr.Markdown("### 請選擇您想表達的內容")
+                                
+                                # 建立5個按鈕用於語音選項
+                                audio_btn1 = gr.Button("選項1", visible=False, variant="primary")
+                                audio_btn2 = gr.Button("選項2", visible=False, variant="primary")
+                                audio_btn3 = gr.Button("選項3", visible=False, variant="primary")
+                                audio_btn4 = gr.Button("選項4", visible=False, variant="primary")
+                                audio_btn5 = gr.Button("選項5", visible=False, variant="primary")
                             
                             # 語音輸入區
                             audio_input = gr.Audio(
@@ -225,19 +252,45 @@ class DialogueApp:
                 logger.info(f"顯示 {len(response_list)} 個回應按鈕")
                 logger.info(f"回應內容: {response_list}")
                 
-                # 先直接修改組件屬性
+                # 強制更新response_box可見性
                 response_box.visible = True
+                response_buttons_container.visible = True
                 
-                # 建立按鈕更新字典
-                updates = {response_box: gr.update(visible=True)}
+                # 建立按鈕更新字典 - 只包含正確的輸出組件
+                updates = {
+                    response_box: gr.update(visible=True)
+                }
                 buttons = [response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
                 
                 # 更新所有按鈕
                 for i, button in enumerate(buttons):
                     if i < len(response_list) and response_list[i]:
-                        button_text = f"{i+1}. {response_list[i]}"
+                        option_text = response_list[i]
+                        # 檢查是否為 JSON 字符串，嘗試提取內部選項
+                        try:
+                            if isinstance(option_text, str) and (option_text.startswith('{') or option_text.startswith('```')):
+                                # 嘗試清理并解析可能的 JSON 字符串
+                                cleaned_text = option_text
+                                if cleaned_text.startswith('```json'):
+                                    cleaned_text = cleaned_text[7:]
+                                if cleaned_text.endswith('```'):
+                                    cleaned_text = cleaned_text[:-3]
+                                cleaned_text = cleaned_text.strip()
+                                
+                                # 嘗試解析為 JSON
+                                if cleaned_text.startswith('{'):
+                                    json_data = json.loads(cleaned_text)
+                                    if 'options' in json_data and isinstance(json_data['options'], list) and json_data['options']:
+                                        # 使用 JSON 中的選項而不是整個 JSON 字符串
+                                        option_text = json_data['options'][i] if i < len(json_data['options']) else option_text
+                                        logger.info(f"從 JSON 中提取選項 {i+1}: {option_text}")
+                        except Exception as e:
+                            logger.warning(f"解析選項時出錯: {e}")
+                            # 繼續使用原始文本
+                        
+                        button_text = f"{i+1}. {option_text}"
                         logger.info(f"設置按鈕 {i+1} 文字: {button_text}")
-                        # 直接修改按鈕屬性
+                        # 直接修改按鈕屬性並強制可見性
                         button.visible = True
                         button.value = button_text
                         updates[button] = gr.update(visible=True, value=button_text)
@@ -256,6 +309,34 @@ class DialogueApp:
                 
                 logger.info(f"Updates to apply: {updates}")
                 return updates
+            
+            def handle_response_btn_click(option_text, history, session_id):
+                """處理文本對話按鈕點擊"""
+                # 移除編號前綴
+                if ". " in option_text:
+                    option_text = option_text.split(". ", 1)[1]
+                
+                logger.info(f"用戶點擊回應按鈕: {option_text}")
+                
+                # 在聊天歷史中，修改現有的上一條消息
+                # 確保虛擬病患的回應顯示在左側（白色框）而非右側（藍色框）
+                if history and len(history) > 0 and history[-1][1] is None:
+                    # 更新最後一個對話的回應部分
+                    history[-1][1] = option_text
+                else:
+                    # 如果沒有待回應的消息，則添加新的病患回應
+                    history = history + [["", option_text]]
+                
+                # 發送選擇給伺服器，但不要將其作為新消息處理
+                try:
+                    # 只記錄選擇，不要處理返回的回應
+                    self.api_client.update_selected_response(session_id, option_text)
+                    # 明確不添加伺服器返回的回應到對話歷史中
+                except Exception as e:
+                    logger.error(f"記錄選擇時出錯: {e}")
+                
+                # 返回更新後的對話歷史和會話ID，清空選項
+                return history, session_id, []
             
             @log_function_call
             def handle_text_input(text, history, char_id, sess_id, config):
@@ -279,6 +360,30 @@ class DialogueApp:
                 if sess_id and self.api_client.session_id != sess_id:
                     logger.info(f"同步客户端会话ID: 从{self.api_client.session_id}到{sess_id}")
                     self.api_client.session_id = sess_id
+                
+                # 检查是否在选择语音识别选项 (输入为数字1-5)
+                if text.isdigit() and 1 <= int(text) <= 5 and response_options.value and len(response_options.value) >= int(text):
+                    option_index = int(text) - 1
+                    selected_option = response_options.value[option_index]
+                    logger.info(f"用户选择了选项 {text}: {selected_option}")
+                    
+                    # 添加选项作为用户输入
+                    history = history + [[selected_option, None]]
+                    
+                    # 发送选择到服务器
+                    try:
+                        response = self.api_client.update_selected_response(self.api_client.session_id, selected_option)
+                        if "responses" in response and response["responses"]:
+                            history[-1][1] = response["responses"][0]
+                        if "session_id" in response:
+                            sess_id = response["session_id"]
+                            self.api_client.session_id = sess_id
+                    except Exception as e:
+                        logger.error(f"发送选择到服务器时出错: {e}")
+                        history[-1][1] = "处理您的选择时出错。"
+                    
+                    # 清空选项
+                    return "", history, sess_id, []
                 
                 # 添加用戶輸入到聊天歷史
                 history = history + [[text, None]]
@@ -329,10 +434,20 @@ class DialogueApp:
                     # 隱藏回應選項
                     return "", history, sess_id, []
             
+            def handle_reset_text():
+                """重置文本對話"""
+                self.api_client.reset_session()
+                return [], None, []
+            
+            def handle_reset_audio():
+                """重置語音對話"""
+                self.api_client.reset_session()
+                return [], None, []
+            
             def handle_audio_input(audio_path, history, char_id, sess_id, config):
                 """處理音頻輸入"""
                 if not audio_path:
-                    return history, sess_id
+                    return history, sess_id, []
                 
                 # 更新 API 客戶端設置
                 self.api_client.set_character(char_id, config)
@@ -344,37 +459,106 @@ class DialogueApp:
                 
                 # 發送請求
                 response = self.api_client.send_audio_message(audio_path, "text")
+                logger.debug(f"音頻識別回應: {response}")
                 
-                # 處理文本回應
-                if "responses" in response and response["responses"]:
+                # 檢查回應中是否包含語音識別選項
+                if "speech_recognition_options" in response and response["speech_recognition_options"]:
+                    # 直接從回應中獲取語音識別選項
+                    options = response["speech_recognition_options"]
+                    logger.info(f"收到語音識別選項: {options}")
+                    
                     # 更新會話 ID
                     if "session_id" in response:
                         sess_id = response["session_id"]
-                    
-                    # 檢查是否為 CONFUSED 狀態
-                    if "state" in response and response["state"] == "CONFUSED":
-                        # 將 CONFUSED 狀態的回應加上提示
-                        confused_response = response["responses"][0]
-                        history[-1][1] = f"{confused_response} (系統暫時無法理解您的問題，請嘗試重新表述)"
+                        
+                    # 顯示提示訊息作為對話系統的回應
+                    if "responses" in response and response["responses"]:
+                        prompt = response["responses"][0]
+                        history[-1][1] = prompt
                     else:
-                        # 正常回應
-                        history[-1][1] = response["responses"][0]
+                        history[-1][1] = "請從以下選項中選擇您想表達的內容:"
+                    
+                    # 返回選項列表給按鈕更新函數
+                    return history, sess_id, options
                 else:
-                    # 處理錯誤
-                    history[-1][1] = "發生錯誤，無法獲取回應。"
+                    # 如果沒有選項，處理普通回應
+                    if "responses" in response and response["responses"]:
+                        # 更新會話 ID
+                        if "session_id" in response:
+                            sess_id = response["session_id"]
+                        
+                        # 檢查是否為 CONFUSED 狀態
+                        if "state" in response and response["state"] == "CONFUSED":
+                            # 將 CONFUSED 狀態的回應加上提示
+                            confused_response = response["responses"][0]
+                            history[-1][1] = f"{confused_response} (系統暫時無法理解您的問題，請嘗試重新表述)"
+                        else:
+                            # 正常回應
+                            history[-1][1] = response["responses"][0]
+                    else:
+                        # 處理錯誤
+                        history[-1][1] = "發生錯誤，無法獲取回應。"
+                    
+                    # 沒有選項時返回空選項列表
+                    return history, sess_id, []
+                    
+            # 處理語音選項按鈕點擊
+            def handle_audio_option_click(option_text, history, session_id):
+                """處理按鈕點擊選擇語音選項"""
+                # 移除編號前綴
+                if ". " in option_text:
+                    option_text = option_text.split(". ", 1)[1]
                 
-                return history, sess_id
-            
-            def handle_reset_text():
-                """重置文本對話"""
-                self.api_client.reset_session()
-                return [], None, []
-            
-            def handle_reset_audio():
-                """重置語音對話"""
-                self.api_client.reset_session()
-                return [], None
-            
+                logger.info(f"用戶選擇了語音選項: {option_text}")
+                
+                # 添加用戶選擇到對話歷史
+                history = history + [[option_text, None]]
+                
+                # 發送選擇給伺服器
+                try:
+                    response = self.api_client.update_selected_response(session_id, option_text)
+                    
+                    if response and "responses" in response and response["responses"]:
+                        # 添加回應
+                        history[-1][1] = response["responses"][0]
+                        
+                    # 更新會話ID
+                    if response and "session_id" in response:
+                        session_id = response["session_id"]
+                except Exception as e:
+                    logger.error(f"處理選擇時出錯: {e}")
+                    history[-1][1] = "處理您的選擇時出錯。"
+                
+                # 返回更新後的對話歷史和會話ID，清空選項
+                return history, session_id, []
+                
+            # 更新語音按鈕顯示
+            def update_audio_buttons(options):
+                """更新語音選項按鈕顯示"""
+                if not options or len(options) == 0:
+                    # 隱藏所有按鈕
+                    return [
+                        gr.update(visible=False),
+                        gr.update(visible=False, value="選項1"),
+                        gr.update(visible=False, value="選項2"),
+                        gr.update(visible=False, value="選項3"),
+                        gr.update(visible=False, value="選項4"),
+                        gr.update(visible=False, value="選項5")
+                    ]
+                
+                # 顯示選項按鈕
+                updates = [gr.update(visible=True)]
+                
+                # 更新每個按鈕
+                for i in range(5):
+                    if i < len(options):
+                        btn_text = f"{i+1}. {options[i]}"
+                        updates.append(gr.update(visible=True, value=btn_text))
+                    else:
+                        updates.append(gr.update(visible=False, value=f"選項{i+1}"))
+                
+                return updates
+                
             def update_text_character(char_name, use_custom, name, persona, backstory, goal, fixed, floating):
                 """更新文本對話角色選擇"""
                 if use_custom:
@@ -423,481 +607,61 @@ class DialogueApp:
                     self.api_client.set_character(char_id)
                     return char_id, None, None
             
-            # 處理患者選擇的回應
-            @log_function_call
-            def handle_response_selection(selected_response, history, sess_id):
-                """處理患者選擇的回應選項"""
-                logger.info(f"患者選擇的回應: {selected_response}")
-                
-                if not history or not selected_response:
-                    logger.warning("無法處理選擇: 歷史記錄或選擇的回應為空")
-                    return history, sess_id, []
-                
-                # 將選擇的回應添加到聊天歷史
-                if history and history[-1][1] is None:
-                    history[-1][1] = selected_response
-                    logger.info(f"將選擇的回應添加到聊天歷史: {selected_response}")
-                elif history:
-                    # 如果已經有回應，則將選擇的回應替換現有的回應
-                    logger.info(f"替換現有回應: {history[-1][1]} -> {selected_response}")
-                    history[-1][1] = selected_response
-                else:
-                    # 如果歷史為空，創建一個新的對話
-                    logger.info(f"創建新對話項目: {selected_response}")
-                    history = [["", selected_response]]
-                
-                # 將選擇的回應發送給 API 客戶端以更新對話歷史
-                # 重要: 這樣病患選擇的回應會被加入到 LLM 的歷史對話中，用於下一輪對話
-                if sess_id:
-                    try:
-                        logger.info(f"發送選擇的回應到伺服器: {selected_response}, 會話ID: {sess_id}")
-                        self.api_client.update_selected_response(sess_id, selected_response)
-                        logger.info("成功發送選擇的回應到伺服器")
-                    except Exception as e:
-                        logger.error(f"發送選擇的回應時出錯: {e}", exc_info=True)
-                else:
-                    logger.warning("無法發送選擇的回應: 會話ID為空")
-                
-                # 清空回應選項
-                return history, sess_id, []
-            
-            @log_function_call
-            def handle_btn1_click(response_value):
-                try:
-                    # Print stack trace for debugging
-                    stack = inspect.stack()
-                    logger.info(f"Call stack: {[frame.function for frame in stack]}")
-                    
-                    # Debug button state
-                    logger.info(f"Button 1 clicked - incoming value: '{response_value}'")
-                    
-                    if not response_value:
-                        logger.warning("Button 1 has no value")
-                        return text_chatbot.value, session_id_text.value, []
-                    
-                    response_text = response_value.split(". ", 1)[1] if ". " in response_value else response_value
-                    logger.info(f"選擇回應按鈕1: {response_text}")
-                    
-                    # Add debugging for current chatbot state
-                    logger.info(f"當前對話歷史: {text_chatbot.value}")
-                    
-                    # 获取会话ID - 检查两个来源确保一致性
-                    current_session_id = session_id_text.value or self.api_client.session_id
-                    logger.info(f"當前會話ID: {current_session_id}")
-                    
-                    # Update the chat history directly
-                    history = text_chatbot.value.copy() if text_chatbot.value else []
-                    logger.info(f"History before update: {history}")
-                    
-                    # 找到最近一次用户输入的内容
-                    last_user_input = "你好"  # 默认值
-                    # 如果有历史记录，尝试获取最后一次用户输入
-                    if history:
-                        for i in range(len(history)-1, -1, -1):
-                            if history[i][0]:  # 如果用户输入不为空
-                                last_user_input = history[i][0]
-                                break
-                    
-                    if history and history[-1][1] is None:
-                        history[-1][1] = response_text
-                        logger.info(f"更新對話歷史: {history}")
-                    elif history:
-                        # If there's already a response, create a new entry with the last user input
-                        logger.info(f"Adding new entry to history with last user input: {last_user_input}")
-                        history.append([last_user_input, response_text])
-                    else:
-                        # If history is empty, create a new entry
-                        logger.info(f"Creating new history")
-                        history = [[last_user_input, response_text]]
-                    
-                    logger.info(f"Updated history: {history}")
-                    
-                    # Force update the chatbot directly
-                    text_chatbot.value = history
-                    
-                    # Try to send the selected response to the server
-                    if current_session_id:
-                        try:
-                            logger.info(f"Sending response to server: {response_text}, Session ID: {current_session_id}")
-                            # 确保客户端会话ID与UI组件中的会话ID同步
-                            if self.api_client.session_id != current_session_id:
-                                logger.info(f"Synchronizing client session ID from {self.api_client.session_id} to {current_session_id}")
-                                self.api_client.session_id = current_session_id
-                            
-                            # 更新会话ID组件
-                            session_id_text.value = current_session_id
-                            
-                            # 发送选择的回应，并检查是否成功
-                            success = self.api_client.update_selected_response(current_session_id, response_text)
-                            if success:
-                                logger.info("Successfully sent response to server")
-                            else:
-                                logger.error("Failed to send response to server")
-                                # 尝试重新发送
-                                logger.info("Retrying...")
-                                success = self.api_client.update_selected_response(current_session_id, response_text)
-                                if success:
-                                    logger.info("Successfully sent response to server on retry")
-                                else:
-                                    logger.error("Failed to send response to server after retry")
-                        except Exception as e:
-                            logger.error(f"Error sending response to server: {e}", exc_info=True)
-                    else:
-                        logger.warning("No session ID available, cannot send to server")
-                    
-                    # 清空回應選項
-                    response_box.visible = False
-                    # Return the updated history and clear response options
-                    return history, current_session_id, []
-                except Exception as e:
-                    logger.error(f"Error in handle_btn1_click: {e}", exc_info=True)
-                    return text_chatbot.value, session_id_text.value, []
-            
-            @log_function_call
-            def handle_btn2_click(response_value):
-                try:
-                    logger.info(f"Button 2 clicked - incoming value: '{response_value}'")
-                    
-                    if not response_value:
-                        logger.warning("Button 2 has no value")
-                        return text_chatbot.value, session_id_text.value, []
-                    
-                    response_text = response_value.split(". ", 1)[1] if ". " in response_value else response_value
-                    logger.info(f"選擇回應按鈕2: {response_text}")
-                    
-                    # Add debugging for current chatbot state
-                    logger.info(f"當前對話歷史: {text_chatbot.value}")
-                    logger.info(f"當前會話ID: {session_id_text.value}")
-                    
-                    # Update the chat history directly
-                    history = text_chatbot.value.copy() if text_chatbot.value else []
-                    logger.info(f"History before update: {history}")
-                    
-                    # 找到最近一次用户输入的内容
-                    last_user_input = "你好"  # 默认值
-                    # 如果有历史记录，尝试获取最后一次用户输入
-                    if history:
-                        for i in range(len(history)-1, -1, -1):
-                            if history[i][0]:  # 如果用户输入不为空
-                                last_user_input = history[i][0]
-                                break
-                    
-                    if history and history[-1][1] is None:
-                        history[-1][1] = response_text
-                        logger.info(f"更新對話歷史: {history}")
-                    elif history:
-                        # If there's already a response, create a new entry with the last user input
-                        logger.info(f"Adding new entry to history with last user input: {last_user_input}")
-                        history.append([last_user_input, response_text])
-                    else:
-                        # If history is empty, create a new entry
-                        logger.info(f"Creating new history")
-                        history = [[last_user_input, response_text]]
-                    
-                    logger.info(f"Updated history: {history}")
-                    
-                    # Force update the chatbot directly
-                    text_chatbot.value = history
-                    
-                    # Try to send the selected response to the server
-                    if session_id_text.value:
-                        try:
-                            logger.info(f"Sending response to server: {response_text}, Session ID: {session_id_text.value}")
-                            # 确保客户端会话ID与UI组件中的会话ID同步
-                            if self.api_client.session_id != session_id_text.value:
-                                logger.info(f"Synchronizing client session ID from {self.api_client.session_id} to {session_id_text.value}")
-                                self.api_client.session_id = session_id_text.value
-                            
-                            # 发送选择的回应，并检查是否成功
-                            success = self.api_client.update_selected_response(session_id_text.value, response_text)
-                            if success:
-                                logger.info("Successfully sent response to server")
-                            else:
-                                logger.error("Failed to send response to server")
-                                # 尝试重新发送
-                                logger.info("Retrying...")
-                                success = self.api_client.update_selected_response(session_id_text.value, response_text)
-                                if success:
-                                    logger.info("Successfully sent response to server on retry")
-                                else:
-                                    logger.error("Failed to send response to server after retry")
-                        except Exception as e:
-                            logger.error(f"Error sending response to server: {e}", exc_info=True)
-                    else:
-                        logger.warning("No session ID available, cannot send to server")
-                    
-                    # 清空回應選項
-                    response_box.visible = False
-                    # Return the updated history and clear response options
-                    return history, session_id_text.value, []
-                except Exception as e:
-                    logger.error(f"Error in handle_btn2_click: {e}", exc_info=True)
-                    return text_chatbot.value, session_id_text.value, []
-            
-            @log_function_call
-            def handle_btn3_click(response_value):
-                try:
-                    logger.info(f"Button 3 clicked - incoming value: '{response_value}'")
-                    
-                    if not response_value:
-                        logger.warning("Button 3 has no value")
-                        return text_chatbot.value, session_id_text.value, []
-                    
-                    response_text = response_value.split(". ", 1)[1] if ". " in response_value else response_value
-                    logger.info(f"選擇回應按鈕3: {response_text}")
-                    
-                    # Update the chat history directly
-                    history = text_chatbot.value.copy() if text_chatbot.value else []
-                    
-                    # 找到最近一次用户输入的内容
-                    last_user_input = "你好"  # 默认值
-                    if history:
-                        for i in range(len(history)-1, -1, -1):
-                            if history[i][0]:  # 如果用户输入不为空
-                                last_user_input = history[i][0]
-                                break
-                    
-                    if history and history[-1][1] is None:
-                        history[-1][1] = response_text
-                        logger.info(f"更新對話歷史: {history}")
-                    elif history:
-                        logger.info(f"Adding new entry to history with last user input: {last_user_input}")
-                        history.append([last_user_input, response_text])
-                    else:
-                        history = [[last_user_input, response_text]]
-                    
-                    # Force update the chatbot directly
-                    text_chatbot.value = history
-                    
-                    # Try to send the selected response to the server
-                    if session_id_text.value:
-                        try:
-                            logger.info(f"Sending response to server: {response_text}, Session ID: {session_id_text.value}")
-                            # 确保客户端会话ID与UI组件中的会话ID同步
-                            if self.api_client.session_id != session_id_text.value:
-                                logger.info(f"Synchronizing client session ID from {self.api_client.session_id} to {session_id_text.value}")
-                                self.api_client.session_id = session_id_text.value
-                            
-                            # 发送选择的回应，并检查是否成功
-                            success = self.api_client.update_selected_response(session_id_text.value, response_text)
-                            if success:
-                                logger.info("Successfully sent response to server")
-                            else:
-                                logger.error("Failed to send response to server")
-                                # 尝试重新发送
-                                logger.info("Retrying...")
-                                success = self.api_client.update_selected_response(session_id_text.value, response_text)
-                                if success:
-                                    logger.info("Successfully sent response to server on retry")
-                                else:
-                                    logger.error("Failed to send response to server after retry")
-                        except Exception as e:
-                            logger.error(f"Error sending response to server: {e}", exc_info=True)
-                    else:
-                        logger.warning("No session ID available, cannot send to server")
-                    
-                    # 清空回應選項
-                    response_box.visible = False
-                    return history, session_id_text.value, []
-                except Exception as e:
-                    logger.error(f"Error in handle_btn3_click: {e}", exc_info=True)
-                    return text_chatbot.value, session_id_text.value, []
-            
-            @log_function_call
-            def handle_btn4_click(response_value):
-                try:
-                    logger.info(f"Button 4 clicked - incoming value: '{response_value}'")
-                    
-                    if not response_value:
-                        logger.warning("Button 4 has no value")
-                        return text_chatbot.value, session_id_text.value, []
-                    
-                    response_text = response_value.split(". ", 1)[1] if ". " in response_value else response_value
-                    logger.info(f"選擇回應按鈕4: {response_text}")
-                    
-                    # Update the chat history directly
-                    history = text_chatbot.value.copy() if text_chatbot.value else []
-                    
-                    # 找到最近一次用户输入的内容
-                    last_user_input = "你好"  # 默认值
-                    if history:
-                        for i in range(len(history)-1, -1, -1):
-                            if history[i][0]:  # 如果用户输入不为空
-                                last_user_input = history[i][0]
-                                break
-                    
-                    if history and history[-1][1] is None:
-                        history[-1][1] = response_text
-                        logger.info(f"更新對話歷史: {history}")
-                    elif history:
-                        logger.info(f"Adding new entry to history with last user input: {last_user_input}")
-                        history.append([last_user_input, response_text])
-                    else:
-                        history = [[last_user_input, response_text]]
-                    
-                    # Force update the chatbot directly
-                    text_chatbot.value = history
-                    
-                    # Try to send the selected response to the server
-                    if session_id_text.value:
-                        try:
-                            logger.info(f"Sending response to server: {response_text}, Session ID: {session_id_text.value}")
-                            # 确保客户端会话ID与UI组件中的会话ID同步
-                            if self.api_client.session_id != session_id_text.value:
-                                logger.info(f"Synchronizing client session ID from {self.api_client.session_id} to {session_id_text.value}")
-                                self.api_client.session_id = session_id_text.value
-                            
-                            # 发送选择的回应，并检查是否成功
-                            success = self.api_client.update_selected_response(session_id_text.value, response_text)
-                            if success:
-                                logger.info("Successfully sent response to server")
-                            else:
-                                logger.error("Failed to send response to server")
-                                # 尝试重新发送
-                                logger.info("Retrying...")
-                                success = self.api_client.update_selected_response(session_id_text.value, response_text)
-                                if success:
-                                    logger.info("Successfully sent response to server on retry")
-                                else:
-                                    logger.error("Failed to send response to server after retry")
-                        except Exception as e:
-                            logger.error(f"Error sending response to server: {e}", exc_info=True)
-                    else:
-                        logger.warning("No session ID available, cannot send to server")
-                    
-                    # 清空回應選項
-                    response_box.visible = False
-                    return history, session_id_text.value, []
-                except Exception as e:
-                    logger.error(f"Error in handle_btn4_click: {e}", exc_info=True)
-                    return text_chatbot.value, session_id_text.value, []
-            
-            @log_function_call
-            def handle_btn5_click(response_value):
-                try:
-                    logger.info(f"Button 5 clicked - incoming value: '{response_value}'")
-                    
-                    if not response_value:
-                        logger.warning("Button 5 has no value")
-                        return text_chatbot.value, session_id_text.value, []
-                    
-                    response_text = response_value.split(". ", 1)[1] if ". " in response_value else response_value
-                    logger.info(f"選擇回應按鈕5: {response_text}")
-                    
-                    # Update the chat history directly
-                    history = text_chatbot.value.copy() if text_chatbot.value else []
-                    
-                    # 找到最近一次用户输入的内容
-                    last_user_input = "你好"  # 默认值
-                    if history:
-                        for i in range(len(history)-1, -1, -1):
-                            if history[i][0]:  # 如果用户输入不为空
-                                last_user_input = history[i][0]
-                                break
-                    
-                    if history and history[-1][1] is None:
-                        history[-1][1] = response_text
-                        logger.info(f"更新對話歷史: {history}")
-                    elif history:
-                        logger.info(f"Adding new entry to history with last user input: {last_user_input}")
-                        history.append([last_user_input, response_text])
-                    else:
-                        history = [[last_user_input, response_text]]
-                    
-                    # Force update the chatbot directly
-                    text_chatbot.value = history
-                    
-                    # Try to send the selected response to the server
-                    if session_id_text.value:
-                        try:
-                            logger.info(f"Sending response to server: {response_text}, Session ID: {session_id_text.value}")
-                            # 确保客户端会话ID与UI组件中的会话ID同步
-                            if self.api_client.session_id != session_id_text.value:
-                                logger.info(f"Synchronizing client session ID from {self.api_client.session_id} to {session_id_text.value}")
-                                self.api_client.session_id = session_id_text.value
-                            
-                            # 发送选择的回应，并检查是否成功
-                            success = self.api_client.update_selected_response(session_id_text.value, response_text)
-                            if success:
-                                logger.info("Successfully sent response to server")
-                            else:
-                                logger.error("Failed to send response to server")
-                                # 尝试重新发送
-                                logger.info("Retrying...")
-                                success = self.api_client.update_selected_response(session_id_text.value, response_text)
-                                if success:
-                                    logger.info("Successfully sent response to server on retry")
-                                else:
-                                    logger.error("Failed to send response to server after retry")
-                        except Exception as e:
-                            logger.error(f"Error sending response to server: {e}", exc_info=True)
-                    else:
-                        logger.warning("No session ID available, cannot send to server")
-                    
-                    # 清空回應選項
-                    response_box.visible = False
-                    return history, session_id_text.value, []
-                except Exception as e:
-                    logger.error(f"Error in handle_btn5_click: {e}", exc_info=True)
-                    return text_chatbot.value, session_id_text.value, []
-            
-            # 設置按鈕點擊事件 - 传入按钮本身的值
-            response_btn1.click(
-                fn=handle_btn1_click,
-                inputs=[response_btn1],
-                outputs=[text_chatbot, session_id_text, response_options]
+            # 設置語音對話事件處理
+            audio_input.stop(
+                fn=handle_audio_input,
+                inputs=[audio_input, audio_chatbot, character_id, session_id_audio, custom_config],
+                outputs=[audio_chatbot, session_id_audio, response_options]
             ).then(
-                fn=lambda: gr.update(visible=False),
-                inputs=[],
-                outputs=[response_box]
-            )
-            
-            # 設置其他按鈕點擊事件
-            response_btn2.click(
-                fn=handle_btn2_click,
-                inputs=[response_btn2],
-                outputs=[text_chatbot, session_id_text, response_options]
-            ).then(
-                fn=lambda: gr.update(visible=False),
-                inputs=[],
-                outputs=[response_box]
-            )
-            
-            response_btn3.click(
-                fn=handle_btn3_click,
-                inputs=[response_btn3],
-                outputs=[text_chatbot, session_id_text, response_options]
-            ).then(
-                fn=lambda: gr.update(visible=False),
-                inputs=[],
-                outputs=[response_box]
-            )
-            
-            response_btn4.click(
-                fn=handle_btn4_click,
-                inputs=[response_btn4],
-                outputs=[text_chatbot, session_id_text, response_options]
-            ).then(
-                fn=lambda: gr.update(visible=False),
-                inputs=[],
-                outputs=[response_box]
-            )
-            
-            response_btn5.click(
-                fn=handle_btn5_click,
-                inputs=[response_btn5],
-                outputs=[text_chatbot, session_id_text, response_options]
-            ).then(
-                fn=lambda: gr.update(visible=False),
-                inputs=[],
-                outputs=[response_box]
-            )
-            
-            # 監聽回應選項變化，更新按鈕
-            response_options.change(
-                fn=update_response_buttons,
+                fn=update_audio_buttons,
                 inputs=[response_options],
-                outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
+                outputs=[audio_response_box, audio_btn1, audio_btn2, audio_btn3, audio_btn4, audio_btn5]
+            )
+            
+            # 設置語音選項按鈕點擊事件
+            audio_btn1.click(
+                fn=handle_audio_option_click,
+                inputs=[audio_btn1, audio_chatbot, session_id_audio],
+                outputs=[audio_chatbot, session_id_audio, response_options]
+            ).then(
+                fn=lambda: [gr.update(visible=False)] + [gr.update(visible=False)] * 5,
+                outputs=[audio_response_box, audio_btn1, audio_btn2, audio_btn3, audio_btn4, audio_btn5]
+            )
+            
+            audio_btn2.click(
+                fn=handle_audio_option_click,
+                inputs=[audio_btn2, audio_chatbot, session_id_audio],
+                outputs=[audio_chatbot, session_id_audio, response_options]
+            ).then(
+                fn=lambda: [gr.update(visible=False)] + [gr.update(visible=False)] * 5,
+                outputs=[audio_response_box, audio_btn1, audio_btn2, audio_btn3, audio_btn4, audio_btn5]
+            )
+            
+            audio_btn3.click(
+                fn=handle_audio_option_click,
+                inputs=[audio_btn3, audio_chatbot, session_id_audio],
+                outputs=[audio_chatbot, session_id_audio, response_options]
+            ).then(
+                fn=lambda: [gr.update(visible=False)] + [gr.update(visible=False)] * 5,
+                outputs=[audio_response_box, audio_btn1, audio_btn2, audio_btn3, audio_btn4, audio_btn5]
+            )
+            
+            audio_btn4.click(
+                fn=handle_audio_option_click,
+                inputs=[audio_btn4, audio_chatbot, session_id_audio],
+                outputs=[audio_chatbot, session_id_audio, response_options]
+            ).then(
+                fn=lambda: [gr.update(visible=False)] + [gr.update(visible=False)] * 5,
+                outputs=[audio_response_box, audio_btn1, audio_btn2, audio_btn3, audio_btn4, audio_btn5]
+            )
+            
+            audio_btn5.click(
+                fn=handle_audio_option_click,
+                inputs=[audio_btn5, audio_chatbot, session_id_audio],
+                outputs=[audio_chatbot, session_id_audio, response_options]
+            ).then(
+                fn=lambda: [gr.update(visible=False)] + [gr.update(visible=False)] * 5,
+                outputs=[audio_response_box, audio_btn1, audio_btn2, audio_btn3, audio_btn4, audio_btn5]
             )
             
             # 設置文本對話事件處理
@@ -905,12 +669,20 @@ class DialogueApp:
                 fn=handle_text_input,
                 inputs=[text_input, text_chatbot, character_id, session_id_text, custom_config],
                 outputs=[text_input, text_chatbot, session_id_text, response_options]
+            ).then(
+                fn=update_response_buttons,
+                inputs=[response_options],
+                outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
             )
             
             text_input.submit(
                 fn=handle_text_input,
                 inputs=[text_input, text_chatbot, character_id, session_id_text, custom_config],
                 outputs=[text_input, text_chatbot, session_id_text, response_options]
+            ).then(
+                fn=update_response_buttons,
+                inputs=[response_options],
+                outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
             )
             
             text_reset_btn.click(
@@ -951,17 +723,37 @@ class DialogueApp:
                 outputs=[character_id, session_id_text, custom_config]
             )
             
+            # Add debug function for UI state
+            @log_function_call
+            def debug_component_states():
+                """Debug function to print the current states of components"""
+                logger.info("=== DEBUG COMPONENT STATES ===")
+                logger.info(f"Response Box visible: {response_box.visible}")
+                logger.info(f"Button 1: visible={response_btn1.visible}, value='{response_btn1.value}'")
+                logger.info(f"Button 2: visible={response_btn2.visible}, value='{response_btn2.value}'")
+                logger.info(f"Button 3: visible={response_btn3.visible}, value='{response_btn3.value}'") 
+                logger.info(f"Button 4: visible={response_btn4.visible}, value='{response_btn4.value}'")
+                logger.info(f"Button 5: visible={response_btn5.visible}, value='{response_btn5.value}'")
+                logger.info(f"Current chatbot history: {text_chatbot.value}")
+                logger.info(f"Current session ID: {session_id_text.value}")
+                logger.info("=== END DEBUG ===")
+                return None
+            
             # 設置語音對話事件處理
             audio_input.stop(
                 fn=handle_audio_input,
                 inputs=[audio_input, audio_chatbot, character_id, session_id_audio, custom_config],
-                outputs=[audio_chatbot, session_id_audio]
+                outputs=[audio_chatbot, session_id_audio, response_options]
+            ).then(
+                fn=update_audio_buttons,
+                inputs=[response_options],
+                outputs=[audio_response_box, audio_btn1, audio_btn2, audio_btn3, audio_btn4, audio_btn5]
             )
             
             audio_reset_btn.click(
                 fn=handle_reset_audio,
                 inputs=[],
-                outputs=[audio_chatbot, session_id_audio]
+                outputs=[audio_chatbot, session_id_audio, response_options]
             )
             
             # 更新語音對話角色選擇
@@ -1009,25 +801,61 @@ class DialogueApp:
                 outputs=[audio_session_display]
             )
             
-            # Add debug function for UI state
-            @log_function_call
-            def debug_component_states():
-                """Debug function to print the current states of components"""
-                logger.info("=== DEBUG COMPONENT STATES ===")
-                logger.info(f"Response Box visible: {response_box.visible}")
-                logger.info(f"Button 1: visible={response_btn1.visible}, value='{response_btn1.value}'")
-                logger.info(f"Button 2: visible={response_btn2.visible}, value='{response_btn2.value}'")
-                logger.info(f"Button 3: visible={response_btn3.visible}, value='{response_btn3.value}'") 
-                logger.info(f"Button 4: visible={response_btn4.visible}, value='{response_btn4.value}'")
-                logger.info(f"Button 5: visible={response_btn5.visible}, value='{response_btn5.value}'")
-                logger.info(f"Current chatbot history: {text_chatbot.value}")
-                logger.info(f"Current session ID: {session_id_text.value}")
-                logger.info("=== END DEBUG ===")
-                return None
-                
             # Add debug button for development (hidden in production)
             debug_button = gr.Button("Debug State", visible=True)
             debug_button.click(fn=debug_component_states, inputs=[], outputs=[])
+            
+            # Add back the text dialogue button handlers before the return statement
+            # 設置文本對話按鈕點擊事件
+            response_btn1.click(
+                fn=handle_response_btn_click,
+                inputs=[response_btn1, text_chatbot, session_id_text],
+                outputs=[text_chatbot, session_id_text, response_options]
+            ).then(
+                fn=update_response_buttons,
+                inputs=[response_options],
+                outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
+            )
+
+            response_btn2.click(
+                fn=handle_response_btn_click,
+                inputs=[response_btn2, text_chatbot, session_id_text],
+                outputs=[text_chatbot, session_id_text, response_options]
+            ).then(
+                fn=update_response_buttons,
+                inputs=[response_options],
+                outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
+            )
+
+            response_btn3.click(
+                fn=handle_response_btn_click,
+                inputs=[response_btn3, text_chatbot, session_id_text],
+                outputs=[text_chatbot, session_id_text, response_options]
+            ).then(
+                fn=update_response_buttons,
+                inputs=[response_options],
+                outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
+            )
+
+            response_btn4.click(
+                fn=handle_response_btn_click,
+                inputs=[response_btn4, text_chatbot, session_id_text],
+                outputs=[text_chatbot, session_id_text, response_options]
+            ).then(
+                fn=update_response_buttons,
+                inputs=[response_options],
+                outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
+            )
+
+            response_btn5.click(
+                fn=handle_response_btn_click,
+                inputs=[response_btn5, text_chatbot, session_id_text],
+                outputs=[text_chatbot, session_id_text, response_options]
+            ).then(
+                fn=update_response_buttons,
+                inputs=[response_options],
+                outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
+            )
         
         # 返回所有組件
         return {
