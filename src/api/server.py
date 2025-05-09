@@ -319,29 +319,61 @@ async def speech_to_text(audio_file: UploadFile) -> str:
     """
     logger.debug(f"開始處理音頻文件: {audio_file.filename}")
     
+    temp_files = []  # 追蹤需要刪除的臨時文件
+    
     try:
         # 保存上傳的文件
-        temp_file_path = f"temp_audio_{uuid.uuid4()}.wav"
-        with open(temp_file_path, "wb") as f:
+        original_audio_path = f"temp_audio_{uuid.uuid4()}.wav"
+        temp_files.append(original_audio_path)
+        
+        with open(original_audio_path, "wb") as f:
             content = await audio_file.read()
             f.write(content)
         
-        logger.debug(f"已保存臨時文件: {temp_file_path}")
+        logger.debug(f"已保存臨時文件: {original_audio_path}")
         
-        # 在真實環境中，這裡會調用語音識別 API
-        # 但為了測試，我們返回一個測試消息
-        test_message = "您好，這是一條測試訊息。請告訴我您是誰？"
+        # 導入音頻處理工具
+        from ..utils.audio_processor import check_audio_format, preprocess_audio
         
-        logger.debug(f"語音轉文本結果: '{test_message}'")
+        # 檢查音頻格式
+        if not check_audio_format(original_audio_path):
+            logger.warning(f"上傳的音頻格式無效或不是WAV格式: {original_audio_path}")
+            return "您好，上傳的音頻格式無效。請使用WAV格式錄音。"
         
-        # 刪除臨時文件
+        # 預處理音頻以優化識別
+        processed_audio_path = f"processed_audio_{uuid.uuid4()}.wav"
+        temp_files.append(processed_audio_path)
+        
+        processed_audio_path = preprocess_audio(
+            input_file=original_audio_path,
+            output_file=processed_audio_path
+        )
+        logger.debug(f"音頻預處理完成: {processed_audio_path}")
+        
+        # 使用 GeminiClient 進行語音識別
         try:
-            os.remove(temp_file_path)
-            logger.debug(f"已刪除臨時文件: {temp_file_path}")
+            from ..llm.gemini_client import GeminiClient
+            
+            # 初始化 GeminiClient
+            gemini_client = GeminiClient()
+            
+            # 調用音頻識別方法，使用處理後的音頻
+            logger.info(f"使用 Gemini 進行音頻識別: {processed_audio_path}")
+            transcription = gemini_client.transcribe_audio(processed_audio_path)
+            
+            # 檢查識別結果
+            if not transcription or transcription.startswith("無法識別") or transcription.startswith("音頻識別過程中發生錯誤"):
+                logger.warning(f"音頻識別失敗或沒有識別出有效內容: {transcription}")
+                # 使用一個友好的回退消息
+                return "您好，我沒能清楚聽到您的問題。請問您能再說一次嗎？"
+            
+            logger.info(f"音頻識別成功: '{transcription}'")
+            return transcription
+            
         except Exception as e:
-            logger.warning(f"刪除臨時文件時出錯: {e}")
-        
-        return test_message
+            logger.error(f"使用 Gemini 進行音頻識別時出錯: {e}", exc_info=True)
+            # 如果 Gemini 識別失敗，使用一個預設文本作為回退
+            return "您好，這是一條測試訊息。目前遇到了語音識別問題，請稍後再試或改用文字輸入。"
     
     except Exception as e:
         logger.error(f"音頻處理失敗: {e}", exc_info=True)
@@ -349,6 +381,16 @@ async def speech_to_text(audio_file: UploadFile) -> str:
             status_code=400,
             detail=f"音頻處理失敗: {str(e)}"
         )
+    
+    finally:
+        # 清理所有臨時文件
+        for temp_file in temp_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+                    logger.debug(f"已刪除臨時文件: {temp_file}")
+            except Exception as e:
+                logger.warning(f"刪除臨時文件時出錯: {e}")
 
 # 會話清理任務
 async def cleanup_old_sessions(background_tasks: BackgroundTasks):
