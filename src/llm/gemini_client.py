@@ -108,7 +108,7 @@ class GeminiClient:
                 self.logger.error(f"讀取音頻文件失敗: {e}", exc_info=True)
                 return "無法讀取音頻文件"
             
-            # 構建提示詞，包括任務描述和音頻數據
+            # 構建提示詞，包括任務描述
             prompt = """
             請識別這段錄音中的語音內容，輸出識別的文本。這是一段病患與醫護人員之間的對話錄音。
             請只返回識別出的文本，不要包含任何額外解釋或格式。
@@ -116,15 +116,19 @@ class GeminiClient:
             如果是背景噪音或沒有語音，請回覆「錄音中沒有清晰的語音」。
             """
             
-            # 準備多模態內容（文本+音頻）
-            content = [
-                {"type": "text", "text": prompt},
-                {
-                    "type": "blob", 
-                    "mime_type": "audio/wav",
-                    "data": audio_data
-                }
-            ]
+            # 按照 genai 庫要求的格式準備多模態內容
+            # 使用 parts 而不是過時的 type/text 格式
+            content = {
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inline_data": {
+                            "mime_type": "audio/wav",
+                            "data": base64.b64encode(audio_data).decode('utf-8')
+                        }
+                    }
+                ]
+            }
             
             # 設定生成參數
             generation_config = {
