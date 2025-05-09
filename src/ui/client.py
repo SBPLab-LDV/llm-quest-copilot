@@ -200,6 +200,19 @@ class ApiClient:
                         # 更新會話ID
                         if "session_id" in data:
                             self.session_id = data["session_id"]
+                            
+                        # 確保 speech_recognition_options 存在並且是有效的列表
+                        if "speech_recognition_options" in data:
+                            if not isinstance(data["speech_recognition_options"], list):
+                                logger.warning(f"speech_recognition_options 不是列表類型，轉換為列表")
+                                # 如果不是列表，嘗試轉換為列表
+                                if data["speech_recognition_options"]:
+                                    data["speech_recognition_options"] = [str(data["speech_recognition_options"])]
+                                else:
+                                    data["speech_recognition_options"] = []
+                            # 確保所有選項都是字符串
+                            data["speech_recognition_options"] = [str(opt) for opt in data["speech_recognition_options"] if opt]
+                            
                         return data
                     except json.JSONDecodeError:
                         logger.error(f"無法解析JSON回應: {response.text}")
@@ -260,7 +273,7 @@ class ApiClient:
         # 不再自动重置会话ID，这是导致问题的原因
         # self.session_id = None
     
-    def update_selected_response(self, session_id: str, selected_response: str) -> bool:
+    def update_selected_response(self, session_id: str, selected_response: str) -> Dict[str, Any]:
         """更新已選擇的回應到伺服器，並將回應加入對話歷史
         
         Args:
@@ -268,7 +281,7 @@ class ApiClient:
             selected_response: 患者選擇的回應
             
         Returns:
-            是否成功發送
+            服務器回應字典或錯誤字典
         """
         logger.info(f"更新選擇的回應: '{selected_response}'")
         
@@ -280,7 +293,7 @@ class ApiClient:
                     logger.info(f"尝试使用客户端会话ID: {self.session_id}")
                     session_id = self.session_id
                 else:
-                    return False
+                    return {"status": "error", "message": "会话ID为空", "responses": ["无法处理您的选择"]}
             
             # 确保本地会话ID与传入的会话ID一致
             if self.session_id != session_id:
@@ -300,22 +313,39 @@ class ApiClient:
             if response.status_code == 200:
                 logger.info("回應選擇已成功發送到伺服器")
                 try:
-                    # 尝试解析返回的JSON数据，查看是否有更新的会话ID
+                    # 解析服務器返回的回應
                     response_data = response.json()
+                    logger.info(f"服務器返回的回應: {response_data}")
+                    
+                    # 如果服務器返回新的會話ID，更新客戶端的會話ID
                     if "session_id" in response_data and response_data["session_id"]:
                         if response_data["session_id"] != self.session_id:
                             logger.info(f"服务器返回新的会话ID: {response_data['session_id']}")
                             self.session_id = response_data["session_id"]
-                    return True
-                except ValueError:
-                    logger.debug("服务器未返回JSON数据或无需更新会话ID")
-                    return True
+                    
+                    # 返回服務器的完整回應
+                    return response_data
+                except ValueError as e:
+                    logger.error(f"解析服務器回應時出錯: {e}")
+                    return {
+                        "status": "error", 
+                        "message": "無法解析服務器回應", 
+                        "responses": ["選擇已記錄，但無法獲取下一步回應"]
+                    }
             else:
                 logger.warning(f"發送回應選擇失敗: {response.status_code} {response.text}")
-                return False
+                return {
+                    "status": "error", 
+                    "message": f"發送選擇失敗: {response.status_code}", 
+                    "responses": ["無法處理您的選擇，請稍後再試"]
+                }
         except Exception as e:
             logger.error(f"更新選擇的回應失敗: {e}", exc_info=True)
-            return False
+            return {
+                "status": "error", 
+                "message": str(e), 
+                "responses": ["發生錯誤，無法處理您的選擇"]
+            }
     
     def reset_session(self) -> None:
         """重置當前會話"""

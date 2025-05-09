@@ -155,4 +155,75 @@ def create_chat_ui():
             "character_selector": character_selector,
             "response_format": response_format,
             "session_info": session_info
-        } 
+        }
+
+def create_custom_character_interface():
+    """創建自定義角色界面
+    
+    Returns:
+        自定義角色界面組件集合
+    """
+    with gr.Accordion("自定義角色", open=False) as accordion:
+        use_custom_config = gr.Checkbox(label="使用自定義角色", value=False)
+        
+        with gr.Group(visible=False) as custom_fields:
+            name = gr.Textbox(label="角色名稱", placeholder="例如：林小明")
+            persona = gr.Textbox(label="角色個性", placeholder="例如：積極樂觀，善於溝通", lines=2)
+            backstory = gr.Textbox(label="角色背景", placeholder="例如：32歲，銀行職員，已婚", lines=3)
+            goal = gr.Textbox(label="對話目標", placeholder="例如：尋求醫生關於頭痛的建議", lines=2)
+            
+            fixed_settings = gr.Textbox(
+                label="固定回應選項",
+                placeholder="輸入固定回應，一行一個\n例如：\n是的，很嚴重\n還好，能忍受\n不，只是偶爾有",
+                lines=5
+            )
+            
+            floating_settings = gr.Textbox(
+                label="浮動回應選項（當符合特定關鍵詞時）",
+                placeholder="格式：關鍵詞:回應\n例如：\n頭痛:頭痛已經持續一週了\n藥物:我沒有服用任何藥物",
+                lines=5
+            )
+    
+    # 設置交互邏輯：勾選使用自定義角色時顯示字段
+    use_custom_config.change(
+        fn=lambda x: gr.update(visible=x),
+        inputs=[use_custom_config],
+        outputs=[custom_fields]
+    )
+    
+    # 定義生成配置的函數
+    def generate_config(use_custom, name, persona, backstory, goal, fixed, floating):
+        if not use_custom:
+            return None
+        
+        # 解析固定回應
+        fixed_list = [r.strip() for r in fixed.split('\n') if r.strip()]
+        
+        # 解析浮動回應
+        floating_dict = {}
+        for line in floating.split('\n'):
+            if ':' in line and line.strip():
+                key, value = line.split(':', 1)
+                floating_dict[key.strip()] = value.strip()
+        
+        return {
+            "name": name,
+            "persona": persona,
+            "backstory": backstory,
+            "goal": goal,
+            "fixed_responses": fixed_list,
+            "floating_responses": floating_dict
+        }
+    
+    return {
+        "accordion": accordion,
+        "use_custom_config": use_custom_config,
+        "name": name,
+        "persona": persona,
+        "backstory": backstory,
+        "goal": goal,
+        "fixed_settings": fixed_settings,
+        "floating_settings": floating_settings,
+        "custom_fields": custom_fields,
+        "generate_config": generate_config
+    } 

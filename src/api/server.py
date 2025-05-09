@@ -17,10 +17,6 @@ import sys
 import codecs
 from dataclasses import asdict
 
-
-import numpy as np
-from scipy.io import wavfile
-
 import uvicorn
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Request
 from fastapi.responses import FileResponse
@@ -79,7 +75,6 @@ class TextRequest(BaseModel):
     text: str
     character_id: str
     session_id: Optional[str] = None
-    response_format: Optional[str] = "text"  # 可選值: "text" 或 "audio"
     character_config: Optional[Dict[str, Any]] = None  # 客戶端提供的角色配置
 
 class DialogueResponse(BaseModel):
@@ -89,6 +84,7 @@ class DialogueResponse(BaseModel):
     state: str
     dialogue_context: str
     session_id: str
+    speech_recognition_options: Optional[List[str]] = None  # 新增: 語音識別可能的選項
 
 class SelectResponseRequest(BaseModel):
     """選擇回應請求模型"""
@@ -308,40 +304,106 @@ def create_default_character(character_id: str) -> Character:
     )
 
 # 語音轉文本函數
-async def speech_to_text(audio_file: UploadFile) -> str:
-    """將上傳的音頻文件轉換為文本
+async def speech_to_text(audio_file: UploadFile) -> Dict[str, Any]:
+    """將上傳的音頻文件轉換為文本，並提供多個可能的完整句子選項
 
     Args:
         audio_file: 上傳的音頻文件
 
     Returns:
-        轉換後的文本
+        包含原始識別和多個選項的字典
     """
     logger.debug(f"開始處理音頻文件: {audio_file.filename}")
     
+    temp_files = []  # 追蹤需要刪除的臨時文件
+    
     try:
         # 保存上傳的文件
-        temp_file_path = f"temp_audio_{uuid.uuid4()}.wav"
-        with open(temp_file_path, "wb") as f:
+        original_audio_path = f"temp_audio_{uuid.uuid4()}.wav"
+        temp_files.append(original_audio_path)
+        
+        with open(original_audio_path, "wb") as f:
             content = await audio_file.read()
             f.write(content)
         
-        logger.debug(f"已保存臨時文件: {temp_file_path}")
+        logger.debug(f"已保存臨時文件: {original_audio_path}")
         
-        # 在真實環境中，這裡會調用語音識別 API
-        # 但為了測試，我們返回一個測試消息
-        test_message = "您好，這是一條測試訊息。請告訴我您是誰？"
+        # 導入音頻處理工具
+        from ..utils.audio_processor import check_audio_format, preprocess_audio
         
-        logger.debug(f"語音轉文本結果: '{test_message}'")
+        # 檢查音頻格式
+        if not check_audio_format(original_audio_path):
+            logger.warning(f"上傳的音頻格式無效或不是WAV格式: {original_audio_path}")
+            return {
+                "original": "音頻格式無效",
+                "options": ["您好，上傳的音頻格式無效。請使用WAV格式錄音。"]
+            }
         
-        # 刪除臨時文件
+        # 預處理音頻以優化識別
+        processed_audio_path = f"processed_audio_{uuid.uuid4()}.wav"
+        temp_files.append(processed_audio_path)
+        
+        processed_audio_path = preprocess_audio(
+            input_file=original_audio_path,
+            output_file=processed_audio_path
+        )
+        logger.debug(f"音頻預處理完成: {processed_audio_path}")
+        
+        # 使用 GeminiClient 進行語音識別
         try:
-            os.remove(temp_file_path)
-            logger.debug(f"已刪除臨時文件: {temp_file_path}")
+            from ..llm.gemini_client import GeminiClient
+            import json
+            
+            # 初始化 GeminiClient
+            gemini_client = GeminiClient()
+            
+            # 調用音頻識別方法，使用處理後的音頻
+            logger.info(f"使用 Gemini 進行音頻識別: {processed_audio_path}")
+            transcription_json = gemini_client.transcribe_audio(processed_audio_path)
+            
+            # 解析識別結果 JSON
+            try:
+                result = json.loads(transcription_json)
+                
+                # 提取原始識別和選項
+                original = result.get("original", "")
+                options = result.get("options", [])
+                
+                logger.info(f"音頻識別成功: 原始='{original}', 選項數={len(options)}")
+                
+                # 檢查識別結果
+                if not original or original.startswith("無法識別") or original.startswith("音頻識別過程中發生錯誤"):
+                    logger.warning(f"音頻識別失敗或沒有識別出有效內容: {original}")
+                    # 使用一個友好的回退消息
+                    return {
+                        "original": original,
+                        "options": ["您好，我沒能清楚聽到您的問題。請問您能再說一次嗎？"]
+                    }
+                
+                # 如果沒有生成選項或選項數量太少，則使用原始識別作為選項
+                if not options or len(options) < 1:
+                    options = [original]
+                
+                # 返回識別結果
+                return {
+                    "original": original,
+                    "options": options
+                }
+                
+            except json.JSONDecodeError:
+                logger.error(f"無法解析識別結果 JSON: {transcription_json}")
+                return {
+                    "original": transcription_json,
+                    "options": [transcription_json]
+                }
+            
         except Exception as e:
-            logger.warning(f"刪除臨時文件時出錯: {e}")
-        
-        return test_message
+            logger.error(f"使用 Gemini 進行音頻識別時出錯: {e}", exc_info=True)
+            # 如果 Gemini 識別失敗，使用一個預設文本作為回退
+            return {
+                "original": "識別失敗",
+                "options": ["您好，這是一條測試訊息。目前遇到了語音識別問題，請稍後再試或改用文字輸入。"]
+            }
     
     except Exception as e:
         logger.error(f"音頻處理失敗: {e}", exc_info=True)
@@ -349,6 +411,16 @@ async def speech_to_text(audio_file: UploadFile) -> str:
             status_code=400,
             detail=f"音頻處理失敗: {str(e)}"
         )
+    
+    finally:
+        # 清理所有臨時文件
+        for temp_file in temp_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+                    logger.debug(f"已刪除臨時文件: {temp_file}")
+            except Exception as e:
+                logger.warning(f"刪除臨時文件時出錯: {e}")
 
 # 會話清理任務
 async def cleanup_old_sessions(background_tasks: BackgroundTasks):
@@ -453,7 +525,8 @@ async def format_dialogue_response(
             responses=response_dict["responses"],
             state=response_dict["state"],
             dialogue_context=response_dict["dialogue_context"],
-            session_id=current_session_id or str(uuid.uuid4())
+            session_id=current_session_id or str(uuid.uuid4()),
+            speech_recognition_options=response_dict.get("speech_recognition_options", None)
         )
         return response
     except Exception as e:
@@ -464,7 +537,8 @@ async def format_dialogue_response(
             responses=["抱歉，處理您的請求時出現錯誤"],
             state="CONFUSED",
             dialogue_context="錯誤處理",
-            session_id=current_session_id or str(uuid.uuid4())
+            session_id=current_session_id or str(uuid.uuid4()),
+            speech_recognition_options=None
         )
 
 # API 路由
@@ -492,10 +566,9 @@ async def process_text_dialogue(
         text = body.get("text", "")
         character_id = body.get("character_id")
         session_id = body.get("session_id")
-        response_format = body.get("response_format", "text")
         character_config = body.get("character_config")  # 提取客戶端提供的角色配置
         
-        logger.debug(f"提取參數: text={text}, character_id={character_id}, session_id={session_id}, response_format={response_format}, character_config={'提供' if character_config else '未提供'}")
+        logger.debug(f"提取參數: text={text}, character_id={character_id}, session_id={session_id}, character_config={'提供' if character_config else '未提供'}")
         
         # 參數檢查
         if not text:
@@ -572,34 +645,8 @@ async def process_text_dialogue(
                 detail=f"格式化回應失敗: {str(e)}"
             )
         
-        # 如果需要語音回覆，轉換文本為語音
-        if response_format == "audio":
-            # 選擇第一個回覆選項作為語音內容
-            text_to_speak = response.responses[0] if response.responses else "無回應"
-            
-            # 生成語音文件
-            audio_file_path = dummy_tts(text_to_speak)
-            
-            # 創建背景任務以刪除臨時文件
-            bg_tasks = BackgroundTasks()
-            bg_tasks.add_task(os.unlink, audio_file_path)
-            
-            # 返回語音文件
-            response = FileResponse(
-                path=audio_file_path,
-                media_type="audio/wav",
-                filename=f"response_{hash(text_to_speak)}.wav",
-                background=bg_tasks  # 使用正確創建的背景任務
-            )
-            # 添加會話ID到頭部
-            if hasattr(response, "session_id"):
-                response.headers["X-Session-ID"] = str(response.session_id)
-            else:
-                response.headers["X-Session-ID"] = str(session_id) if session_id else ""
-            return response
-        else:
-            # 返回正常的文本回覆
-            return response
+        # 直接返回文本回應
+        return response
         
     except json.JSONDecodeError as e:
         logger.error(f"JSON 解析錯誤: {e}")
@@ -669,108 +716,82 @@ async def process_audio_dialogue(
             )
     
     # 語音轉文本
-    text = await speech_to_text(audio_file)
-    logger.debug(f"音頻已轉換為文本: '{text}'")
+    text_result = await speech_to_text(audio_file)
+    logger.debug(f"音頻識別結果: {text_result}")
     
-    # 調用對話管理器處理用戶輸入
+    # 處理返回結果（可能是字典或JSON字符串）
+    if isinstance(text_result, dict):
+        # 已經是字典，直接使用
+        text_dict = text_result
+        logger.debug("speech_to_text 返回了字典對象")
+    else:
+        # 嘗試解析 JSON 字符串
+        try:
+            text_dict = json.loads(text_result)
+            logger.debug("成功將 speech_to_text 返回的 JSON 字符串解析為字典")
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.error(f"無法解析音頻識別結果: {e}")
+            # 使用預設值
+            text_dict = {
+                "original": str(text_result),
+                "options": [str(text_result)]
+            }
+            logger.debug(f"使用預設字典: {text_dict}")
+    
+    # 提取原始文本和選項
+    original_text = text_dict.get("original", "")
+    options_list = text_dict.get("options", [])
+    
+    # 確保選項是有效的列表
+    if not isinstance(options_list, list) or not options_list:
+        logger.warning("識別選項無效或為空，使用原始文本作為選項")
+        options_list = [original_text] if original_text else ["無法識別您的語音"]
+        
+    logger.info(f"原始識別文本: '{original_text}'")
+    logger.info(f"識別選項 ({len(options_list)}): {options_list}")
+    
+    # 將語音識別選項和狀態保存在DialogueManager中，供選擇回應時使用
     dialogue_manager = session["dialogue_manager"]
-    logger.debug(f"調用對話管理器處理音頻轉換文本: '{text}'")
-    response_json = await dialogue_manager.process_turn(text)
+    if not hasattr(dialogue_manager, 'last_speech_options'):
+        dialogue_manager.last_speech_options = []
+    dialogue_manager.last_speech_options = options_list
+    
+    if not hasattr(dialogue_manager, 'last_response_state'):
+        dialogue_manager.last_response_state = ""
+    dialogue_manager.last_response_state = "WAITING_SELECTION"
+    
+    # 記錄到對話歷史，添加標記以便識別
+    dialogue_manager.conversation_history.append("[系統]: 請從語音識別選項中選擇")
+    
+    # 創建回應
+    response = DialogueResponse(
+        status="success",
+        responses=["請從以下選項中選擇您想表達的內容:"],
+        state="WAITING_SELECTION",
+        dialogue_context="語音選項選擇",
+        session_id=session_id,
+        speech_recognition_options=options_list
+    )
+    
+    # 保存語音識別選項到交互日誌
+    dialogue_manager.log_interaction(
+        user_input="[語音輸入]",
+        response_options=options_list,
+        selected_response=None
+    )
     
     # 排程清理舊會話
     background_tasks.add_task(cleanup_old_sessions, background_tasks)
     
-    # 使用輔助函數格式化回應
-    response = await format_dialogue_response(
-        response_json=response_json,
-        session_id=session_id,
-        session=session
-    )
+    logger.debug(f"返回語音識別選項: {response}")
     
-    logger.debug(f"返回音頻對話回應: {response}")
-    
-    # 如果需要語音回覆，轉換文本為語音
-    if response_format == "audio":
-        # 選擇第一個回覆選項作為語音內容
-        text_to_speak = response.responses[0] if response.responses else "無回應"
-        
-        # 生成語音文件
-        audio_file_path = dummy_tts(text_to_speak)
-        
-        # 創建背景任務以刪除臨時文件
-        bg_tasks = BackgroundTasks()
-        bg_tasks.add_task(os.unlink, audio_file_path)
-        
-        # 返回語音文件
-        response = FileResponse(
-            path=audio_file_path,
-            media_type="audio/wav",
-            filename=f"response_{hash(text_to_speak)}.wav",
-            background=bg_tasks  # 使用正確創建的背景任務
-        )
-        # 添加會話ID到頭部
-        response.headers["X-Session-ID"] = str(session_id) if session_id else ""
-        return response
-    else:
-        # 返回正常的文本回覆
-        return response
+    # 直接返回文本回應
+    return response
 
 @app.get("/api/health")
 async def health_check():
     """健康檢查端點"""
     return {"status": "ok", "active_sessions": len(session_store)}
-
-# 添加一個簡單的 dummy TTS 函數
-def dummy_tts(text: str) -> str:
-    """模擬文本轉語音功能，生成測試用的音頻文件
-
-    Args:
-        text: 要轉換為語音的文本
-
-    Returns:
-        生成的音頻文件路徑
-    """
-    logger.debug(f"生成測試音頻文件，文本: '{text}'")
-    
-    try:
-        # 創建一個簡單的 WAV 文件
-        # 16kHz 採樣率，單聲道，16 位整數
-        sample_rate = 16000
-        duration = min(2 + len(text) * 0.05, 10)  # 根據文本長度調整，最長10秒
-        
-        # 產生數據，使用簡單的正弦波
-        t = np.arange(0, duration, 1/sample_rate)
-        frequency = 440  # A4 音符的頻率
-        amplitude = 32767 * 0.5  # 16 位整數的一半振幅
-        
-        # 生成正弦波
-        audio = np.sin(2 * np.pi * frequency * t) * amplitude
-        audio = audio.astype(np.int16)  # 轉換為 16 位整數
-        
-        # 創建臨時文件
-        output_path = f"temp_tts_{uuid.uuid4()}.wav"
-        
-        # 保存為 WAV 文件
-        from scipy.io import wavfile
-        wavfile.write(output_path, sample_rate, audio)
-        
-        logger.debug(f"已生成測試音頻文件: {output_path}")
-        return output_path
-    
-    except Exception as e:
-        logger.error(f"生成測試音頻文件失敗: {e}", exc_info=True)
-        # 如果出錯，創建一個空音頻文件
-        output_path = f"empty_tts_{uuid.uuid4()}.wav"
-        
-        # 創建 1 秒鐘的靜音
-        sample_rate = 16000
-        silence = np.zeros(sample_rate, dtype=np.int16)
-        
-        from scipy.io import wavfile
-        wavfile.write(output_path, sample_rate, silence)
-        
-        logger.warning(f"由於錯誤，創建了空白音頻文件: {output_path}")
-        return output_path
 
 # 添加一個新函數創建對話管理器，並添加詳細日誌記錄
 def create_dialogue_manager(character: Character, log_dir: str = "logs/api") -> DialogueManager:
@@ -822,7 +843,42 @@ async def select_response(request: SelectResponseRequest):
         # 將選擇的回應添加到對話歷史
         dialogue_manager = session["dialogue_manager"]
         
-        # 記錄到對話歷史（假設最後一輪對話還沒有回應）
+        # 檢查對話歷史中的最後一個狀態是否為等待選擇狀態
+        # 使用更可靠的檢測方法，檢查會話屬性而非文本匹配
+        is_after_speech_recognition = False
+        
+        # 1. 檢查是否有語音識別標記
+        if hasattr(dialogue_manager, 'last_response_state') and dialogue_manager.last_response_state == "WAITING_SELECTION":
+            is_after_speech_recognition = True
+            logger.debug("檢測到語音識別狀態標記: WAITING_SELECTION")
+        
+        # 2. 檢查對話日誌中是否有語音識別選項記錄
+        if hasattr(dialogue_manager, 'interaction_log') and dialogue_manager.interaction_log:
+            latest_entries = dialogue_manager.interaction_log[-3:]  # 檢查最近的3個記錄
+            for entry in latest_entries:
+                if isinstance(entry, dict) and 'speech_recognition_options' in entry and entry['speech_recognition_options']:
+                    is_after_speech_recognition = True
+                    logger.debug("檢測到語音識別選項記錄")
+                    break
+        
+        # 3. 檢查選擇的回應是否在最近的語音識別選項列表中
+        if hasattr(dialogue_manager, 'last_speech_options') and dialogue_manager.last_speech_options:
+            # 檢查部分匹配，因為選項可能有些微差異
+            for option in dialogue_manager.last_speech_options:
+                if option in request.selected_response or request.selected_response in option:
+                    is_after_speech_recognition = True
+                    logger.debug(f"選擇的回應與語音選項匹配: {option}")
+                    break
+        
+        # 4. 直接檢查對話內容中的標記或關鍵詞
+        last_entries = dialogue_manager.conversation_history[-3:]  # 檢查最近的3個對話
+        for entry in last_entries:
+            if "語音輸入" in entry or "請從以下選項中選擇" in entry or "語音識別" in entry:
+                is_after_speech_recognition = True
+                logger.debug(f"從對話內容檢測到語音識別相關標記: {entry}")
+                break
+        
+        # 記錄到對話歷史
         dialogue_manager.conversation_history.append(f"{dialogue_manager.character.name}: {request.selected_response}")
         
         # 記錄選擇的回應
@@ -831,10 +887,45 @@ async def select_response(request: SelectResponseRequest):
             response_options=[],  # 空，因為選項已經在之前的請求中記錄
             selected_response=request.selected_response
         )
+        
+        # 保存交互日誌
         dialogue_manager.save_interaction_log()
         
+        # 如果這是語音識別後的選擇，不需要向 Gemini API 發送請求
+        if is_after_speech_recognition:
+            logger.info(f"這是語音識別後的選擇，跳過 Gemini API 處理: {request.selected_response}")
+            
+            # 清除語音識別的狀態標記(如果有)
+            if hasattr(dialogue_manager, 'last_response_state'):
+                dialogue_manager.last_response_state = "NORMAL"
+            if hasattr(dialogue_manager, 'last_speech_options'):
+                dialogue_manager.last_speech_options = []
+            
+            # 直接返回成功訊息，不包含回應
+            return {
+                "status": "success", 
+                "message": "語音識別選擇已記錄",
+                "responses": ["已記錄您的選擇"],
+                "state": "NORMAL",
+                "dialogue_context": "語音識別選擇完成"
+            }
+        
+        # 如果不是語音識別後的選擇，正常處理
+        logger.info(f"處理選擇的回應，發送到 Gemini API: {request.selected_response}")
+        response_json = await dialogue_manager.process_turn(request.selected_response)
+        
         logger.debug(f"成功記錄選擇的回應: {request.selected_response}")
-        return {"status": "success", "message": "回應選擇已記錄"}
+        logger.debug(f"對話管理器處理結果: {response_json}")
+        
+        # 構建具有處理結果的回應
+        response_dict = json.loads(response_json)
+        return {
+            "status": "success", 
+            "message": "回應選擇已記錄",
+            "responses": response_dict.get("responses", []),
+            "state": response_dict.get("state", "NORMAL"),
+            "dialogue_context": response_dict.get("dialogue_context", "一般對話")
+        }
     
     except Exception as e:
         logger.error(f"處理選擇回應時出錯: {e}", exc_info=True)
