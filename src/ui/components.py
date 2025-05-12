@@ -173,15 +173,15 @@ def create_custom_character_interface():
             goal = gr.Textbox(label="對話目標", placeholder="例如：尋求醫生關於頭痛的建議", lines=2)
             
             fixed_settings = gr.Textbox(
-                label="固定回應選項",
-                placeholder="輸入固定回應，一行一個\n例如：\n是的，很嚴重\n還好，能忍受\n不，只是偶爾有",
-                lines=5
+                label="固定設定",
+                placeholder="格式：鍵:值\n例如：\n流水編號:1\n年齡:69\n性別:男\n診斷:齒齦癌\n分期:pT2N0M0, stage II",
+                lines=8
             )
             
             floating_settings = gr.Textbox(
-                label="浮動回應選項（當符合特定關鍵詞時）",
-                placeholder="格式：關鍵詞:回應\n例如：\n頭痛:頭痛已經持續一週了\n藥物:我沒有服用任何藥物",
-                lines=5
+                label="浮動設定",
+                placeholder="格式：鍵:值\n例如：\n目前接受治療場所:病房\n目前治療階段:手術後/出院前\n關鍵字:傷口\n個案現況:病人右臉頰縫線持續有黃色分泌物",
+                lines=8
             )
     
     # 設置交互邏輯：勾選使用自定義角色時顯示字段
@@ -196,23 +196,47 @@ def create_custom_character_interface():
         if not use_custom:
             return None
         
-        # 解析固定回應
-        fixed_list = [r.strip() for r in fixed.split('\n') if r.strip()]
+        # 解析固定設定
+        fixed_dict = {}
+        for line in fixed.split('\n'):
+            if ':' in line and line.strip():
+                key, value = line.split(':', 1)
+                key = key.strip()
+                value = value.strip()
+                # 嘗試將數值轉換為整數或浮點數
+                if value.isdigit():
+                    fixed_dict[key] = int(value)
+                else:
+                    try:
+                        fixed_dict[key] = float(value)
+                    except ValueError:
+                        fixed_dict[key] = value
         
-        # 解析浮動回應
+        # 解析浮動設定
         floating_dict = {}
         for line in floating.split('\n'):
             if ':' in line and line.strip():
                 key, value = line.split(':', 1)
-                floating_dict[key.strip()] = value.strip()
+                key = key.strip()
+                value = value.strip()
+                # 嘗試將數值轉換為整數或浮點數
+                if value.isdigit():
+                    floating_dict[key] = int(value)
+                else:
+                    try:
+                        floating_dict[key] = float(value)
+                    except ValueError:
+                        floating_dict[key] = value
         
         return {
             "name": name,
             "persona": persona,
             "backstory": backstory,
             "goal": goal,
-            "fixed_responses": fixed_list,
-            "floating_responses": floating_dict
+            "details": {
+                "fixed_settings": fixed_dict,
+                "floating_settings": floating_dict
+            }
         }
     
     return {
