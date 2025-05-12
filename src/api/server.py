@@ -212,6 +212,20 @@ async def get_or_create_session(
             # 嘗試使用客戶端提供的配置
             try:
                 logger.info(f"使用客戶端提供的配置創建角色: {character_id}")
+                
+                # 檢查 character_config 是否為字符串，若是則嘗試解析為字典
+                if isinstance(character_config, str):
+                    try:
+                        logger.info("character_config 是字符串，嘗試解析為 JSON")
+                        character_config = json.loads(character_config)
+                        logger.info("成功將 character_config 字符串解析為字典")
+                    except json.JSONDecodeError as e:
+                        logger.error(f"解析 character_config 字符串失敗: {e}")
+                        # 使用預設值創建
+                        character = create_default_character(character_id)
+                        character_cache[character_id] = character
+                        return session_store[new_session_id]
+                
                 logger.debug(f"配置內容: {json.dumps(character_config, ensure_ascii=False, indent=2)}")
                 
                 # 提取必要字段
@@ -570,6 +584,16 @@ async def process_text_dialogue(
         
         logger.debug(f"提取參數: text={text}, character_id={character_id}, session_id={session_id}, character_config={'提供' if character_config else '未提供'}")
         
+        # 檢查 character_config 是否為字符串，若是則嘗試解析為字典
+        if character_config and isinstance(character_config, str):
+            try:
+                logger.info("process_text_dialogue: character_config 是字符串，嘗試解析為 JSON")
+                character_config = json.loads(character_config)
+                logger.info("process_text_dialogue: 成功將 character_config 字符串解析為字典")
+            except json.JSONDecodeError as e:
+                logger.error(f"process_text_dialogue: 解析 character_config 字符串失敗: {e}")
+                # 繼續處理，get_or_create_session 會處理解析問題
+        
         # 參數檢查
         if not text:
             raise HTTPException(status_code=400, detail="必須提供 text 參數")
@@ -691,7 +715,9 @@ async def process_audio_dialogue(
             logger.debug(f"已解析角色配置 JSON: {json.dumps(character_config, ensure_ascii=False, indent=2)}")
         except json.JSONDecodeError as e:
             logger.error(f"角色配置 JSON 解析錯誤: {e}")
-            raise HTTPException(status_code=400, detail=f"無效的角色配置 JSON: {str(e)}")
+            # 不要直接中斷，嘗試使用原始字符串
+            logger.info("使用原始字符串作為 character_config，讓 get_or_create_session 處理")
+            character_config = character_config_json
     
     # 如果有會話 ID，使用現有會話
     if session_id and session_id in session_store:

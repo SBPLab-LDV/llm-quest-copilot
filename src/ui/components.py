@@ -1,6 +1,18 @@
 import gradio as gr
 import os
+import logging
 from typing import List, Dict, Any, Optional, Callable
+
+# 設置日誌記錄
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('ui_debug.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("ui_components")
 
 def create_character_selector(api_client, on_change: Optional[Callable] = None):
     """創建角色選擇器組件
@@ -173,15 +185,15 @@ def create_custom_character_interface():
             goal = gr.Textbox(label="對話目標", placeholder="例如：尋求醫生關於頭痛的建議", lines=2)
             
             fixed_settings = gr.Textbox(
-                label="固定回應選項",
-                placeholder="輸入固定回應，一行一個\n例如：\n是的，很嚴重\n還好，能忍受\n不，只是偶爾有",
-                lines=5
+                label="固定設定",
+                placeholder="格式：鍵:值\n例如：\n流水編號:1\n年齡:69\n性別:男\n診斷:齒齦癌\n分期:pT2N0M0, stage II",
+                lines=8
             )
             
             floating_settings = gr.Textbox(
-                label="浮動回應選項（當符合特定關鍵詞時）",
-                placeholder="格式：關鍵詞:回應\n例如：\n頭痛:頭痛已經持續一週了\n藥物:我沒有服用任何藥物",
-                lines=5
+                label="浮動設定",
+                placeholder="格式：鍵:值\n例如：\n目前接受治療場所:病房\n目前治療階段:手術後/出院前\n關鍵字:傷口\n個案現況:病人右臉頰縫線持續有黃色分泌物",
+                lines=8
             )
     
     # 設置交互邏輯：勾選使用自定義角色時顯示字段
@@ -193,27 +205,89 @@ def create_custom_character_interface():
     
     # 定義生成配置的函數
     def generate_config(use_custom, name, persona, backstory, goal, fixed, floating):
+        logger.info("開始生成自定義角色配置")
+        logger.debug(f"輸入參數：\nuse_custom: {use_custom}\nname: {name}\npersona: {persona}\nbackstory: {backstory}\ngoal: {goal}")
+        logger.debug(f"固定設定原始輸入：\n{fixed}")
+        logger.debug(f"浮動設定原始輸入：\n{floating}")
+        
         if not use_custom:
+            logger.info("未使用自定義角色，返回 None")
             return None
         
-        # 解析固定回應
-        fixed_list = [r.strip() for r in fixed.split('\n') if r.strip()]
+        # 中文鍵名到英文的映射表
+        cn_to_en_mapping = {
+            # 固定設定常見鍵名
+            "流水編號": "serial_number",
+            "年齡": "age",
+            "性別": "gender", 
+            "診斷": "diagnosis",
+            "分期": "stage",
+            # 浮動設定常見鍵名
+            "目前接受治療場所": "current_treatment_location",
+            "目前治療階段": "current_treatment_stage",
+            "關鍵字": "keywords",
+            "個案現況": "current_status",
+            "現況": "current_condition"
+        }
         
-        # 解析浮動回應
+        # 解析固定設定
+        fixed_dict = {}
+        for line in fixed.split('\n'):
+            if ':' in line and line.strip():
+                key, value = line.split(':', 1)
+                key = key.strip()
+                value = value.strip()
+                
+                # 檢查並轉換中文鍵名到英文
+                en_key = cn_to_en_mapping.get(key, key)
+                logger.debug(f"將固定設定鍵名 '{key}' 映射為 '{en_key}'")
+                
+                # 嘗試將數值轉換為整數或浮點數
+                if value.isdigit():
+                    fixed_dict[en_key] = int(value)
+                else:
+                    try:
+                        fixed_dict[en_key] = float(value)
+                    except ValueError:
+                        fixed_dict[en_key] = value
+        logger.debug(f"解析後的固定設定：{fixed_dict}")
+        
+        # 解析浮動設定
         floating_dict = {}
         for line in floating.split('\n'):
             if ':' in line and line.strip():
                 key, value = line.split(':', 1)
-                floating_dict[key.strip()] = value.strip()
+                key = key.strip()
+                value = value.strip()
+                
+                # 檢查並轉換中文鍵名到英文
+                en_key = cn_to_en_mapping.get(key, key)
+                logger.debug(f"將浮動設定鍵名 '{key}' 映射為 '{en_key}'")
+                
+                # 嘗試將數值轉換為整數或浮點數
+                if value.isdigit():
+                    floating_dict[en_key] = int(value)
+                else:
+                    try:
+                        floating_dict[en_key] = float(value)
+                    except ValueError:
+                        floating_dict[en_key] = value
+        logger.debug(f"解析後的浮動設定：{floating_dict}")
         
-        return {
+        # 創建標準格式的配置
+        config = {
             "name": name,
             "persona": persona,
             "backstory": backstory,
             "goal": goal,
-            "fixed_responses": fixed_list,
-            "floating_responses": floating_dict
+            "details": {
+                "fixed_settings": fixed_dict,
+                "floating_settings": floating_dict
+            }
         }
+        logger.info("成功生成配置")
+        logger.debug(f"最終配置：{config}")
+        return config
     
     return {
         "accordion": accordion,

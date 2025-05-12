@@ -344,21 +344,30 @@ class DialogueApp:
                 if not text.strip():
                     return "", history, sess_id, []
                 
-                logger.info(f"开始处理文本输入，现有会话ID: {sess_id}")
+                logger.info(f"開始處理文本輸入，現有會話ID: {sess_id}")
+                logger.info(f"角色ID: {char_id}")
+                logger.info(f"配置: {config is not None}")
                 
                 # 更新 API 客戶端設置 - 但不要重置会话ID
                 if self.api_client.character_id != char_id or self.api_client.character_config != config:
-                    logger.info(f"角色已变更，设置新角色但保留现有会话ID: {sess_id}")
+                    logger.info(f"角色已變更，設置新角色但保留現有會話ID")
                     # 保存现有会话ID
                     current_session_id = self.api_client.session_id
                     # 设置新角色
-                    self.api_client.set_character(char_id, config)
+                    if config:
+                        logger.info(f"使用自定義配置，角色ID: {char_id}")
+                        self.api_client.set_character(char_id, config)
+                    else:
+                        logger.info(f"使用預設角色ID: {char_id}")
+                        self.api_client.set_character(char_id)
                     # 恢复会话ID
-                    self.api_client.session_id = current_session_id or sess_id
+                    if current_session_id or sess_id:
+                        self.api_client.session_id = current_session_id or sess_id
+                        logger.info(f"恢復會話ID: {self.api_client.session_id}")
                 
                 # 确保会话ID一致
                 if sess_id and self.api_client.session_id != sess_id:
-                    logger.info(f"同步客户端会话ID: 从{self.api_client.session_id}到{sess_id}")
+                    logger.info(f"同步客户端会话ID: 從{self.api_client.session_id}到{sess_id}")
                     self.api_client.session_id = sess_id
                 
                 # 检查是否在选择语音识别选项 (输入为数字1-5)
@@ -391,10 +400,35 @@ class DialogueApp:
                 # 直接更新chatbot UI
                 text_chatbot.value = history
                 
+                # 準備請求數據
+                request_data = {
+                    "text": text,
+                    "response_format": "text"
+                }
+                
+                # 根據是否有自定義配置決定使用哪種方式
+                if config:
+                    logger.info("使用自定義角色配置發送請求")
+                    request_data["character_config"] = config
+                    # 記錄主要配置內容
+                    if isinstance(config, dict):
+                        logger.debug(f"配置鍵: {list(config.keys())}")
+                        if "details" in config:
+                            logger.debug(f"固定設定鍵: {list(config.get('details', {}).get('fixed_settings', {}).keys())}")
+                            logger.debug(f"浮動設定鍵: {list(config.get('details', {}).get('floating_settings', {}).keys())}")
+                else:
+                    logger.info(f"使用預設角色ID: {char_id}")
+                    request_data["character_id"] = char_id
+                
+                # 如果有會話ID，添加到請求中
+                if sess_id:
+                    request_data["session_id"] = sess_id
+                    logger.info(f"使用現有會話ID: {sess_id}")
+                
                 # 發送請求
-                logger.info(f"发送文本: {text}, 会话ID: {self.api_client.session_id}")
-                response = self.api_client.send_text_message(text, "text")
-                logger.info(f"收到回应: {response}")
+                logger.info(f"發送文本: {text}")
+                response = self.api_client.send_text(request_data)
+                logger.info(f"收到回應: {response}")
                 
                 # 處理文本回應
                 if "responses" in response and response["responses"]:
@@ -402,14 +436,14 @@ class DialogueApp:
                     if "session_id" in response:
                         sess_id = response["session_id"]
                         self.api_client.session_id = sess_id  # 确保同步客户端的会话ID
-                        logger.info(f"更新会话ID: {sess_id}")
+                        logger.info(f"更新會話ID: {sess_id}")
                         
                         # 重要：让所有组件更新会话ID
                         session_id_text.value = sess_id
                     
                     # 記錄對話歷史和會話ID供除錯用途
-                    logger.info(f"当前完整对话历史: {history}")
-                    logger.info(f"API客户端会话ID: {self.api_client.session_id}")
+                    logger.info(f"當前完整對話歷史: {history}")
+                    logger.info(f"API客戶端會話ID: {self.api_client.session_id}")
                     
                     # 檢查是否為 CONFUSED 狀態
                     if "state" in response and response["state"] == "CONFUSED":
@@ -448,16 +482,34 @@ class DialogueApp:
                 if not audio_path:
                     return history, sess_id, []
                 
-                # 更新 API 客戶端設置
-                self.api_client.set_character(char_id, config)
+                logger.info(f"處理音頻輸入: {audio_path}")
+                logger.info(f"當前角色ID: {char_id}")
+                logger.info(f"當前會話ID: {sess_id}")
+                logger.info(f"自定義配置: {config}")
+                
+                # 準備請求數據
+                request_data = {
+                    "audio_file": audio_path,
+                    "response_format": "text"
+                }
+                
+                # 根據是否有自定義配置決定使用哪種方式
+                if config:
+                    logger.info("使用自定義角色配置")
+                    request_data["character_config"] = config
+                else:
+                    logger.info(f"使用預設角色ID: {char_id}")
+                    request_data["character_id"] = char_id
+                
+                # 如果有會話ID，添加到請求中
                 if sess_id:
-                    self.api_client.session_id = sess_id
+                    request_data["session_id"] = sess_id
                 
                 # 添加用戶輸入到聊天歷史
                 history = history + [["[語音輸入]", None]]
                 
                 # 發送請求
-                response = self.api_client.send_audio_message(audio_path, "text")
+                response = self.api_client.send_audio(request_data)
                 logger.debug(f"音頻識別回應: {response}")
                 
                 # 檢查回應中是否包含語音識別選項
@@ -606,8 +658,17 @@ class DialogueApp:
             
             def update_text_character(char_name, use_custom, name, persona, backstory, goal, fixed, floating):
                 """更新文本對話角色選擇"""
+                logger.info(f"更新文本對話角色: {char_name}")
+                logger.info(f"使用自定義角色: {use_custom}")
+                
                 if use_custom:
                     # 使用自定義角色配置
+                    logger.info("生成自定義角色配置")
+                    logger.info(f"名稱: {name}")
+                    logger.info(f"個性 (簡略): {persona[:20]}...")
+                    logger.info(f"背景 (簡略): {backstory[:20]}...")
+                    logger.info(f"目標 (簡略): {goal[:20]}...")
+                    
                     config_fn = text_custom_char["generate_config"]
                     config = config_fn(use_custom, name, persona, backstory, goal, fixed, floating)
                     
@@ -615,23 +676,62 @@ class DialogueApp:
                     if config and "error" not in config:
                         # 使用隨機 ID 作為自定義角色 ID
                         custom_id = f"custom_{int(time.time())}"
+                        logger.info(f"生成的自定義角色ID: {custom_id}")
+                        
+                        # 記錄配置結構
+                        if isinstance(config, dict):
+                            logger.info(f"配置包含以下鍵: {list(config.keys())}")
+                            if "details" in config:
+                                logger.info(f"固定設定: {config.get('details', {}).get('fixed_settings', {})}")
+                                logger.info(f"浮動設定: {config.get('details', {}).get('floating_settings', {})}")
+                        
                         self.api_client.set_character(custom_id, config)
-                        return custom_id, None, config
+                        logger.info(f"已設置自定義角色，ID: {custom_id}")
+                        
+                        # 重置會話ID，確保新對話使用新的角色設定
+                        sess_id = None
+                        self.api_client.reset_session()
+                        logger.info("已重置會話ID以使用新的角色設定")
+                        
+                        return custom_id, sess_id, config
                     else:
                         # 配置錯誤，使用默認角色
+                        logger.error(f"自定義角色配置無效，使用默認角色")
                         char_id = text_character_map.get(char_name, "1")
                         self.api_client.set_character(char_id)
-                        return char_id, None, None
+                        
+                        # 重置會話ID
+                        sess_id = None
+                        self.api_client.reset_session()
+                        
+                        return char_id, sess_id, None
                 else:
                     # 使用預設角色
+                    logger.info(f"使用預設角色名稱: {char_name}")
                     char_id = text_character_map.get(char_name, "1")
+                    logger.info(f"預設角色ID: {char_id}")
                     self.api_client.set_character(char_id)
-                    return char_id, None, None
+                    
+                    # 重置會話ID
+                    sess_id = None
+                    self.api_client.reset_session()
+                    logger.info("已重置會話ID以使用新的角色設定")
+                    
+                    return char_id, sess_id, None
             
             def update_audio_character(char_name, use_custom, name, persona, backstory, goal, fixed, floating):
                 """更新語音對話角色選擇"""
+                logger.info(f"更新語音對話角色: {char_name}")
+                logger.info(f"使用自定義角色: {use_custom}")
+                
                 if use_custom:
                     # 使用自定義角色配置
+                    logger.info("生成自定義角色配置")
+                    logger.info(f"名稱: {name}")
+                    logger.info(f"個性 (簡略): {persona[:20]}...")
+                    logger.info(f"背景 (簡略): {backstory[:20]}...")
+                    logger.info(f"目標 (簡略): {goal[:20]}...")
+                    
                     config_fn = audio_custom_char["generate_config"]
                     config = config_fn(use_custom, name, persona, backstory, goal, fixed, floating)
                     
@@ -639,18 +739,48 @@ class DialogueApp:
                     if config and "error" not in config:
                         # 使用隨機 ID 作為自定義角色 ID
                         custom_id = f"custom_{int(time.time())}"
+                        logger.info(f"生成的自定義角色ID: {custom_id}")
+                        
+                        # 記錄配置結構
+                        if isinstance(config, dict):
+                            logger.info(f"配置包含以下鍵: {list(config.keys())}")
+                            if "details" in config:
+                                logger.info(f"固定設定: {config.get('details', {}).get('fixed_settings', {})}")
+                                logger.info(f"浮動設定: {config.get('details', {}).get('floating_settings', {})}")
+                        
                         self.api_client.set_character(custom_id, config)
-                        return custom_id, None, config
+                        logger.info(f"已設置自定義角色，ID: {custom_id}")
+                        
+                        # 重置會話ID，確保新對話使用新的角色設定
+                        sess_id = None
+                        self.api_client.reset_session()
+                        logger.info("已重置會話ID以使用新的角色設定")
+                        
+                        return custom_id, sess_id, config
                     else:
                         # 配置錯誤，使用默認角色
+                        logger.error(f"自定義角色配置無效，使用默認角色")
                         char_id = audio_character_map.get(char_name, "1")
                         self.api_client.set_character(char_id)
-                        return char_id, None, None
+                        
+                        # 重置會話ID
+                        sess_id = None
+                        self.api_client.reset_session()
+                        
+                        return char_id, sess_id, None
                 else:
                     # 使用預設角色
+                    logger.info(f"使用預設角色名稱: {char_name}")
                     char_id = audio_character_map.get(char_name, "1")
+                    logger.info(f"預設角色ID: {char_id}")
                     self.api_client.set_character(char_id)
-                    return char_id, None, None
+                    
+                    # 重置會話ID
+                    sess_id = None
+                    self.api_client.reset_session()
+                    logger.info("已重置會話ID以使用新的角色設定")
+                    
+                    return char_id, sess_id, None
             
             # 設置語音對話事件處理
             audio_input.stop(
@@ -781,6 +911,56 @@ class DialogueApp:
                 outputs=[text_chatbot, session_id_text, response_options]
             )
             
+            # 設置文本對話的角色選擇事件處理
+            text_selector.change(
+                fn=update_text_character,
+                inputs=[
+                    text_selector,
+                    text_custom_char["use_custom_config"],
+                    text_custom_char["name"],
+                    text_custom_char["persona"],
+                    text_custom_char["backstory"],
+                    text_custom_char["goal"],
+                    text_custom_char["fixed_settings"],
+                    text_custom_char["floating_settings"]
+                ],
+                outputs=[character_id, session_id_text, custom_config]
+            )
+            
+            # 當文本對話自定義配置變更時重新生成配置
+            text_custom_char["use_custom_config"].change(
+                fn=update_text_character,
+                inputs=[
+                    text_selector,
+                    text_custom_char["use_custom_config"],
+                    text_custom_char["name"],
+                    text_custom_char["persona"],
+                    text_custom_char["backstory"],
+                    text_custom_char["goal"],
+                    text_custom_char["fixed_settings"],
+                    text_custom_char["floating_settings"]
+                ],
+                outputs=[character_id, session_id_text, custom_config]
+            )
+            
+            # 當自定義配置的字段發生變化時，更新配置
+            for field in ["name", "persona", "backstory", "goal", "fixed_settings", "floating_settings"]:
+                if field in text_custom_char:
+                    text_custom_char[field].change(
+                        fn=update_text_character,
+                        inputs=[
+                            text_selector,
+                            text_custom_char["use_custom_config"],
+                            text_custom_char["name"],
+                            text_custom_char["persona"],
+                            text_custom_char["backstory"],
+                            text_custom_char["goal"],
+                            text_custom_char["fixed_settings"],
+                            text_custom_char["floating_settings"]
+                        ],
+                        outputs=[character_id, session_id_text, custom_config]
+                    )
+            
             # 當自定義配置變更時重新生成配置
             audio_custom_char["use_custom_config"].change(
                 fn=update_audio_character,
@@ -796,6 +976,24 @@ class DialogueApp:
                 ],
                 outputs=[character_id, session_id_audio, custom_config]
             )
+            
+            # 當自定義配置的字段發生變化時，更新配置
+            for field in ["name", "persona", "backstory", "goal", "fixed_settings", "floating_settings"]:
+                if field in audio_custom_char:
+                    audio_custom_char[field].change(
+                        fn=update_audio_character,
+                        inputs=[
+                            audio_selector,
+                            audio_custom_char["use_custom_config"],
+                            audio_custom_char["name"],
+                            audio_custom_char["persona"],
+                            audio_custom_char["backstory"],
+                            audio_custom_char["goal"],
+                            audio_custom_char["fixed_settings"],
+                            audio_custom_char["floating_settings"]
+                        ],
+                        outputs=[character_id, session_id_audio, custom_config]
+                    )
             
             # 監視並顯示會話ID (用於調試)
             session_id_text.change(
