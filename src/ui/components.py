@@ -1,6 +1,18 @@
 import gradio as gr
 import os
+import logging
 from typing import List, Dict, Any, Optional, Callable
+
+# 設置日誌記錄
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('ui_debug.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("ui_components")
 
 def create_character_selector(api_client, on_change: Optional[Callable] = None):
     """創建角色選擇器組件
@@ -193,7 +205,13 @@ def create_custom_character_interface():
     
     # 定義生成配置的函數
     def generate_config(use_custom, name, persona, backstory, goal, fixed, floating):
+        logger.info("開始生成自定義角色配置")
+        logger.debug(f"輸入參數：\nuse_custom: {use_custom}\nname: {name}\npersona: {persona}\nbackstory: {backstory}\ngoal: {goal}")
+        logger.debug(f"固定設定原始輸入：\n{fixed}")
+        logger.debug(f"浮動設定原始輸入：\n{floating}")
+        
         if not use_custom:
+            logger.info("未使用自定義角色，返回 None")
             return None
         
         # 解析固定設定
@@ -211,6 +229,7 @@ def create_custom_character_interface():
                         fixed_dict[key] = float(value)
                     except ValueError:
                         fixed_dict[key] = value
+        logger.debug(f"解析後的固定設定：{fixed_dict}")
         
         # 解析浮動設定
         floating_dict = {}
@@ -227,8 +246,9 @@ def create_custom_character_interface():
                         floating_dict[key] = float(value)
                     except ValueError:
                         floating_dict[key] = value
+        logger.debug(f"解析後的浮動設定：{floating_dict}")
         
-        return {
+        config = {
             "name": name,
             "persona": persona,
             "backstory": backstory,
@@ -238,6 +258,9 @@ def create_custom_character_interface():
                 "floating_settings": floating_dict
             }
         }
+        logger.info("成功生成配置")
+        logger.debug(f"最終配置：{config}")
+        return config
     
     return {
         "accordion": accordion,
