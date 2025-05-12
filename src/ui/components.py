@@ -214,6 +214,22 @@ def create_custom_character_interface():
             logger.info("未使用自定義角色，返回 None")
             return None
         
+        # 中文鍵名到英文的映射表
+        cn_to_en_mapping = {
+            # 固定設定常見鍵名
+            "流水編號": "serial_number",
+            "年齡": "age",
+            "性別": "gender", 
+            "診斷": "diagnosis",
+            "分期": "stage",
+            # 浮動設定常見鍵名
+            "目前接受治療場所": "current_treatment_location",
+            "目前治療階段": "current_treatment_stage",
+            "關鍵字": "keywords",
+            "個案現況": "current_status",
+            "現況": "current_condition"
+        }
+        
         # 解析固定設定
         fixed_dict = {}
         for line in fixed.split('\n'):
@@ -221,14 +237,19 @@ def create_custom_character_interface():
                 key, value = line.split(':', 1)
                 key = key.strip()
                 value = value.strip()
+                
+                # 檢查並轉換中文鍵名到英文
+                en_key = cn_to_en_mapping.get(key, key)
+                logger.debug(f"將固定設定鍵名 '{key}' 映射為 '{en_key}'")
+                
                 # 嘗試將數值轉換為整數或浮點數
                 if value.isdigit():
-                    fixed_dict[key] = int(value)
+                    fixed_dict[en_key] = int(value)
                 else:
                     try:
-                        fixed_dict[key] = float(value)
+                        fixed_dict[en_key] = float(value)
                     except ValueError:
-                        fixed_dict[key] = value
+                        fixed_dict[en_key] = value
         logger.debug(f"解析後的固定設定：{fixed_dict}")
         
         # 解析浮動設定
@@ -238,16 +259,22 @@ def create_custom_character_interface():
                 key, value = line.split(':', 1)
                 key = key.strip()
                 value = value.strip()
+                
+                # 檢查並轉換中文鍵名到英文
+                en_key = cn_to_en_mapping.get(key, key)
+                logger.debug(f"將浮動設定鍵名 '{key}' 映射為 '{en_key}'")
+                
                 # 嘗試將數值轉換為整數或浮點數
                 if value.isdigit():
-                    floating_dict[key] = int(value)
+                    floating_dict[en_key] = int(value)
                 else:
                     try:
-                        floating_dict[key] = float(value)
+                        floating_dict[en_key] = float(value)
                     except ValueError:
-                        floating_dict[key] = value
+                        floating_dict[en_key] = value
         logger.debug(f"解析後的浮動設定：{floating_dict}")
         
+        # 創建標準格式的配置
         config = {
             "name": name,
             "persona": persona,

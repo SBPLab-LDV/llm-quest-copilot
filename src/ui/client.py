@@ -79,40 +79,89 @@ class ApiClient:
             # 返回默認角色
             return [{"id": "1", "name": "默認病患"}]
     
-    def send_text_message(self, text: str, response_format: str = "text") -> Dict[str, Any]:
+    def send_text(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
         """發送文本消息並獲取回應
         
         Args:
-            text: 用戶輸入的文本
-            response_format: 回應格式 ("text" 或 "audio")
+            request_data: 請求數據，包含文本和其他可選參數
             
         Returns:
             API 回應
         """
         try:
             url = f"{self.base_url}/api/dialogue/text"
-            data = {
-                "text": text,
-                "character_id": self.character_id or "1",  # 確保始終有角色ID
-                "session_id": self.session_id,
-                "response_format": response_format
-            }
             
-            # 添加角色配置（如果有）
-            if self.character_config:
-                data["character_config"] = self.character_config
+            # 確保必要的字段
+            if "text" not in request_data:
+                logger.error("請求缺少必要字段: text")
+                return {
+                    "status": "error",
+                    "message": "請求缺少必要字段: text",
+                    "responses": ["請提供文本輸入"]
+                }
+                
+            # 準備最終的請求數據
+            final_request = request_data.copy()
             
-            logger.info(f"發送文本消息到 {url}: {data}")
-            response = requests.post(url, json=data)
+            # 重要修改：確保即使提供 character_config 也要提供 character_id
+            # 根據API錯誤，character_id 是必要參數
+            if "character_id" not in final_request or not final_request["character_id"]:
+                final_request["character_id"] = self.character_id or "1"
+                logger.info(f"添加必要的character_id參數: {final_request['character_id']}")
             
+            # 處理角色配置
+            if "character_config" in request_data and request_data["character_config"]:
+                # 確保character_config是JSON格式化的字符串
+                if isinstance(request_data["character_config"], dict):
+                    logger.info(f"序列化自定義角色配置為JSON")
+                    final_request["character_config"] = json.dumps(request_data["character_config"])
+                logger.info(f"使用提供的自定義角色配置: {final_request['character_config']}")
+            elif self.character_config:
+                # 使用客戶端存儲的自定義配置
+                logger.info(f"使用客戶端存儲的自定義角色配置")
+                final_request["character_config"] = json.dumps(self.character_config)
+            
+            # 使用當前會話ID（如果未提供）
+            if "session_id" not in final_request or not final_request["session_id"]:
+                final_request["session_id"] = self.session_id
+            
+            # 使用默認回應格式（如果未提供）
+            if "response_format" not in final_request:
+                final_request["response_format"] = "text"
+            
+            # 發送請求
+            logger.info(f"發送文本消息到 {url}: {final_request}")
+            response = requests.post(url, json=final_request)
+            
+            # 添加更多詳細的錯誤處理和日誌記錄
+            if response.status_code != 200:
+                logger.error(f"API 請求失敗! 狀態碼: {response.status_code}")
+                logger.error(f"錯誤詳情: {response.text}")
+                
+                # 嘗試從錯誤響應中提取更多信息
+                error_message = "無法連接到服務器"
+                try:
+                    error_data = response.json()
+                    if "detail" in error_data:
+                        error_message = error_data["detail"]
+                except Exception:
+                    # 如果無法解析 JSON，嘗試使用文本內容
+                    error_message = response.text if response.text else error_message
+                
+                return {
+                    "status": "error",
+                    "message": f"API 錯誤 ({response.status_code}): {error_message}",
+                    "responses": [f"無法處理您的請求: {error_message}"]
+                }
+                
             # 檢查是否為音頻回應
-            if response_format == "audio" and response.headers.get('Content-Type') == 'audio/wav':
+            if final_request.get("response_format") == "audio" and response.headers.get('Content-Type') == 'audio/wav':
                 # 從頭部獲取會話ID
                 self.session_id = response.headers.get('X-Session-ID')
                 logger.info(f"收到音頻回應，會話ID: {self.session_id}")
                 
                 # 保存音頻
-                audio_file = self._save_audio_response(response, text)
+                audio_file = self._save_audio_response(response, final_request["text"])
                 logger.info(f"音頻已保存到: {audio_file}")
                 
                 return {
@@ -145,39 +194,68 @@ class ApiClient:
                 "responses": ["無法連接到服務器"]
             }
     
-    def send_audio_message(self, audio_file_path: str, response_format: str = "text") -> Dict[str, Any]:
+    def send_audio(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
         """發送音頻消息並獲取回應
         
         Args:
-            audio_file_path: 音頻文件路徑
-            response_format: 回應格式 ("text" 或 "audio")
+            request_data: 請求數據字典，必須包含 audio_file 字段
             
         Returns:
             API 回應
         """
         try:
+            # 檢查必要字段
+            if "audio_file" not in request_data or not request_data["audio_file"]:
+                logger.error("音頻請求缺少必要字段: audio_file")
+                return {
+                    "status": "error",
+                    "message": "音頻請求缺少必要字段: audio_file",
+                    "responses": ["請提供音頻文件"]
+                }
+            
+            audio_file_path = request_data["audio_file"]
             url = f"{self.base_url}/api/dialogue/audio"
             logger.info(f"發送音頻消息到 {url}, 文件: {audio_file_path}")
             
             with open(audio_file_path, "rb") as audio_file:
                 files = {"audio_file": audio_file}
-                data = {
-                    "character_id": self.character_id or "1",  # 確保始終有角色ID
-                    "response_format": response_format
-                }
+                data = {}
                 
-                if self.session_id:
+                # 複製請求參數到 data（排除 audio_file）
+                for key, value in request_data.items():
+                    if key != "audio_file":
+                        # 如果是字典型別（如角色配置），序列化為JSON
+                        if key == "character_config" and isinstance(value, dict):
+                            # 直接將JSON字符串作為單獨參數傳遞，而不是作為form-data
+                            data["character_config"] = json.dumps(value)
+                            logger.info(f"將character_config序列化為JSON: {data['character_config']}")
+                        else:
+                            data[key] = value
+                
+                # 確保即使提供 character_config 也要提供 character_id
+                # 根據API錯誤，character_id 是必要參數
+                if "character_id" not in data or not data["character_id"]:
+                    data["character_id"] = self.character_id or "1"
+                    logger.info(f"添加必要的character_id參數: {data['character_id']}")
+                
+                # 如果沒有提供角色配置，使用客戶端默認值
+                if "character_config" not in data and self.character_config:
+                    data["character_config"] = json.dumps(self.character_config)
+                    logger.info(f"使用客戶端默認角色配置: {data['character_config']}")
+                
+                # 如果沒有提供會話ID，使用客戶端默認值
+                if "session_id" not in data and self.session_id:
                     data["session_id"] = self.session_id
                 
-                # 添加角色配置（如果有）
-                if self.character_config:
-                    # 由於 multipart/form-data 格式限制，需要將字典序列化為 JSON 字符串
-                    data["character_config_json"] = json.dumps(self.character_config)
+                # 如果沒有提供回應格式，使用默認文本格式
+                if "response_format" not in data:
+                    data["response_format"] = "text"
                     
+                logger.info(f"完整的請求數據: {data}")
                 response = requests.post(url, files=files, data=data)
                 
                 # 檢查是否為音頻回應
-                if response_format == "audio" and response.headers.get('Content-Type') == 'audio/wav':
+                if data.get("response_format") == "audio" and response.headers.get('Content-Type') == 'audio/wav':
                     # 從頭部獲取會話ID
                     self.session_id = response.headers.get('X-Session-ID')
                     logger.info(f"收到音頻回應，會話ID: {self.session_id}")
@@ -261,17 +339,36 @@ class ApiClient:
             logger.warning("嘗試設置空角色ID，使用默認值")
             character_id = "1"
             
+        # 記錄之前的角色設置
+        previous_char_id = self.character_id
+        previous_config = self.character_config
+        
+        # 更新角色ID
         logger.info(f"設置角色ID: {character_id}")
         self.character_id = character_id
         
+        # 更新角色配置
         if character_config:
-            logger.info(f"設置角色配置: {character_config}")
+            logger.info(f"設置自定義角色配置:")
+            
+            # 記錄關鍵部分以便調試
+            if isinstance(character_config, dict):
+                logger.info(f"  名稱: {character_config.get('name', '未指定')}")
+                logger.info(f"  個性: {character_config.get('persona', '未指定')}")
+                logger.info(f"  背景: {character_config.get('backstory', '未指定')[:50]}...")
+                
+                # 檢查詳細設定格式
+                details = character_config.get('details', {})
+                if details:
+                    logger.info(f"  固定設定: {details.get('fixed_settings', {})}")
+                    logger.info(f"  浮動設定: {details.get('floating_settings', {})}")
+            
             self.character_config = character_config
         else:
+            logger.info("未設置自定義角色配置，使用默認角色ID")
             self.character_config = None
             
-        # 不再自动重置会话ID，这是导致问题的原因
-        # self.session_id = None
+        logger.info(f"角色設置已從 [{previous_char_id}, 配置={previous_config != None}] 變更為 [{self.character_id}, 配置={self.character_config != None}]")
     
     def update_selected_response(self, session_id: str, selected_response: str) -> Dict[str, Any]:
         """更新已選擇的回應到伺服器，並將回應加入對話歷史
