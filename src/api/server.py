@@ -16,6 +16,7 @@ from typing import Dict, Optional, List, Any, Union
 import sys
 import codecs
 from dataclasses import asdict
+import yaml
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Request
@@ -68,6 +69,32 @@ logger = logging.getLogger(__name__)
 from ..core.dialogue import DialogueManager
 from ..core.character import Character
 from ..core.state import DialogueState
+from ..utils.speech_input import SpeechInput
+
+# SpeechInput Handler Initialization
+speech_input_handler: Optional[SpeechInput] = None
+CONFIG_FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'config.yaml')
+
+try:
+    with open(CONFIG_FILE_PATH, 'r', encoding='utf-8') as f:
+        config_data = yaml.safe_load(f)
+    
+    google_api_key_path = config_data.get("google_api_key")
+
+    if google_api_key_path:
+        speech_input_handler = SpeechInput(google_api_key=google_api_key_path, debug_mode=config_data.get('debug_mode', False))
+        logger.info(f"SpeechInput handler initialized successfully using key from {CONFIG_FILE_PATH}.")
+    else:
+        logger.warning(f"'google_api_key' not found or empty in {CONFIG_FILE_PATH}. Speech input via speech_recognition will be unavailable.")
+
+except FileNotFoundError:
+    logger.warning(f"Configuration file {CONFIG_FILE_PATH} not found. Speech input via speech_recognition will be unavailable.")
+except yaml.YAMLError as e:
+    logger.error(f"Error parsing YAML configuration file {CONFIG_FILE_PATH}: {e}", exc_info=True)
+    logger.warning("Speech input via speech_recognition will be unavailable due to YAML parsing error.")
+except Exception as e:
+    logger.error(f"Failed to initialize SpeechInput handler from config: {e}", exc_info=True)
+    logger.warning("Speech input via speech_recognition will be unavailable due to an unexpected error during initialization.")
 
 # 定義請求和回應模型
 class TextRequest(BaseModel):
@@ -813,6 +840,104 @@ async def process_audio_dialogue(
     
     # 直接返回文本回應
     return response
+
+@app.post("/api/dialogue/audio_input", response_model=DialogueResponse)
+async def process_audio_input_dialogue(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    audio_file: UploadFile = File(...),
+    character_id: str = Form(...),
+    session_id: Optional[str] = Form(None),
+    character_config_json: Optional[str] = Form(None), 
+):
+    """處理音頻輸入對話請求 (使用 speech_recognition)"""
+    logger.debug(f"Processing audio input dialogue request (speech_recognition): character_id={character_id}, session_id={session_id}, character_config_json={'provided' if character_config_json else 'not provided'}")
+
+    if not speech_input_handler:
+        logger.error("SpeechInput handler not initialized. GOOGLE_SPEECH_CREDENTIALS_PATH might be missing or invalid.")
+        raise HTTPException(status_code=503, detail="Speech recognition service not configured or unavailable.")
+
+    temp_audio_file_path: Optional[str] = None
+    try:
+        # 解析角色配置 JSON 字符串
+        character_config = None
+        if character_config_json:
+            try:
+                character_config = json.loads(character_config_json)
+                logger.debug(f"Parsed character_config_json: {json.dumps(character_config, ensure_ascii=False, indent=2)}")
+            except json.JSONDecodeError as e:
+                logger.error(f"Character config JSON parsing error: {e}")
+                # 使用原始字符串讓 get_or_create_session 嘗試處理，或根據需求拋出錯誤
+                character_config = character_config_json 
+
+        # 會話管理
+        if session_id and session_id in session_store:
+            session = session_store[session_id]
+            session["last_activity"] = asyncio.get_event_loop().time()
+        else:
+            try:
+                session = await get_or_create_session(
+                    request=request,
+                    character_id=character_id,
+                    character_config=character_config
+                )
+                # 獲取新創建會話的 ID
+                current_session_id = next(key for key, value in session_store.items() if value is session)
+                logger.debug(f"Created new session: {current_session_id}")
+            except Exception as e:
+                logger.error(f"Error creating session: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Failed to create session: {str(e)}")
+        
+        # 確保 current_session_id 被賦值
+        if not session_id: # 如果是新會話
+            session_id = current_session_id
+
+        # 保存上傳的音頻文件到臨時文件
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_audio_file:
+            content = await audio_file.read()
+            tmp_audio_file.write(content)
+            temp_audio_file_path = tmp_audio_file.name
+        logger.debug(f"Temporary audio file saved to: {temp_audio_file_path}")
+
+        # 語音轉文本
+        text_input = speech_input_handler.recognize_from_file(temp_audio_file_path)
+
+        if not text_input:
+            logger.warning(f"Speech recognition failed for audio file: {temp_audio_file_path}. No text input.")
+            raise HTTPException(status_code=400, detail="Could not understand audio or speech input was empty.")
+        
+        logger.info(f"Recognized text from audio: '{text_input}'")
+
+        # 核心對話處理
+        dialogue_manager = session["dialogue_manager"]
+        logger.debug(f"Calling dialogue manager with transcribed text: '{text_input}'")
+        response_json = await dialogue_manager.process_turn(text_input)
+        logger.debug(f"Dialogue manager returned: {response_json}")
+
+        # 格式化並返回回應
+        formatted_response = await format_dialogue_response(
+            response_json=response_json,
+            session_id=session_id, 
+            session=session
+        )
+        
+        background_tasks.add_task(cleanup_old_sessions, background_tasks)
+        logger.debug(f"Returning formatted response: {formatted_response}")
+        return formatted_response
+
+    except HTTPException: # 重新拋出已處理的 HTTP 異常
+        raise
+    except Exception as e:
+        logger.error(f"Error processing audio input dialogue: {e}", exc_info=True)
+        logger.error(f"Detailed error stack: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error processing audio request: {str(e)}")
+    finally:
+        if temp_audio_file_path and os.path.exists(temp_audio_file_path):
+            try:
+                os.remove(temp_audio_file_path)
+                logger.debug(f"Deleted temporary audio file: {temp_audio_file_path}")
+            except Exception as e:
+                logger.warning(f"Error deleting temporary audio file {temp_audio_file_path}: {e}")
 
 @app.get("/api/health")
 async def health_check():
