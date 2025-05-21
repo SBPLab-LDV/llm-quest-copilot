@@ -15,7 +15,7 @@ logger = logging.getLogger("ui_client")
 class ApiClient:
     """API 客戶端，用於與對話系統 API 通信"""
     
-    def __init__(self, base_url: str = "http://120.126.51.6:8000"):
+    def __init__(self, base_url: str = "http://0.0.0.0:8000"):
         """初始化 API 客戶端
         
         Args:
