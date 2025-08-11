@@ -122,15 +122,15 @@ class DialogueApp:
             gr.Markdown("使用此界面與虛擬病患進行對話。您可以選擇不同的角色進行對話。")
             
             # 創建會話狀態
-            character_id = gr.State("1")  # 默認角色 ID
+            character_id = gr.State("0")  # 默認角色 ID
             session_id_text = gr.State(None)  # 文本對話會話 ID
             session_id_audio = gr.State(None)  # 語音對話會話 ID
             custom_config = gr.State(None)  # 自定義角色配置
             
             # 使用標籤頁創建兩種不同的界面
             with gr.Tabs() as tabs:
-                # 文本對話標籤頁
-                with gr.TabItem("文本對話"):
+                # 文字回答標籤頁
+                with gr.TabItem("文字回答"):
                     with gr.Row():
                         with gr.Column(scale=3):
                             # 創建聊天區
@@ -171,7 +171,7 @@ class DialogueApp:
                             text_reset_btn = gr.Button("重置對話")
                 
                 # 語音對話標籤頁
-                with gr.TabItem("語音對話"):
+                with gr.TabItem("口語表達"):
                     with gr.Row():
                         with gr.Column(scale=3):
                             # 創建聊天區

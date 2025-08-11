@@ -29,7 +29,7 @@ def create_character_selector(api_client, on_change: Optional[Callable] = None):
     
     # 如果無法獲取角色，使用默認值
     if not characters:
-        characters = [{"id": "1", "name": "默認病患"}]
+        characters = [{"id": "0", "name": "default"}]
     
     # 創建角色選項
     character_names = [char["name"] for char in characters]

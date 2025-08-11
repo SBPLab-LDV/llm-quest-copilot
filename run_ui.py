@@ -17,7 +17,7 @@ def main():
         parser = argparse.ArgumentParser(description="醫護對話系統 UI")
         parser.add_argument(
             "--api-url", 
-            default="http://0.0.0.0:8000",
+            default="http://127.0.0.1:8000",
             help="API 服務器的 URL"
         )
         parser.add_argument(

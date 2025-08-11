@@ -16,9 +16,10 @@ from typing import Dict, Optional, List, Any, Union
 import sys
 import codecs
 from dataclasses import asdict
+import yaml
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Body
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -68,6 +69,32 @@ logger = logging.getLogger(__name__)
 from ..core.dialogue import DialogueManager
 from ..core.character import Character
 from ..core.state import DialogueState
+from ..utils.speech_input import SpeechInput
+
+# SpeechInput Handler Initialization
+speech_input_handler: Optional[SpeechInput] = None
+CONFIG_FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'config.yaml')
+
+try:
+    with open(CONFIG_FILE_PATH, 'r', encoding='utf-8') as f:
+        config_data = yaml.safe_load(f)
+    
+    google_api_key_path = config_data.get("google_api_key")
+
+    if google_api_key_path:
+        speech_input_handler = SpeechInput(google_api_key=google_api_key_path, debug_mode=config_data.get('debug_mode', False))
+        logger.info(f"SpeechInput handler initialized successfully using key from {CONFIG_FILE_PATH}.")
+    else:
+        logger.warning(f"'google_api_key' not found or empty in {CONFIG_FILE_PATH}. Speech input via speech_recognition will be unavailable.")
+
+except FileNotFoundError:
+    logger.warning(f"Configuration file {CONFIG_FILE_PATH} not found. Speech input via speech_recognition will be unavailable.")
+except yaml.YAMLError as e:
+    logger.error(f"Error parsing YAML configuration file {CONFIG_FILE_PATH}: {e}", exc_info=True)
+    logger.warning("Speech input via speech_recognition will be unavailable due to YAML parsing error.")
+except Exception as e:
+    logger.error(f"Failed to initialize SpeechInput handler from config: {e}", exc_info=True)
+    logger.warning("Speech input via speech_recognition will be unavailable due to an unexpected error during initialization.")
 
 # 定義請求和回應模型
 class TextRequest(BaseModel):
@@ -85,6 +112,7 @@ class DialogueResponse(BaseModel):
     dialogue_context: str
     session_id: str
     speech_recognition_options: Optional[List[str]] = None  # 新增: 語音識別可能的選項
+    original_transcription: Optional[str] = None  # 新增: 原始語音轉錄文本
 
 class SelectResponseRequest(BaseModel):
     """選擇回應請求模型"""
@@ -555,11 +583,35 @@ async def format_dialogue_response(
             speech_recognition_options=None
         )
 
+# 添加一個新函數創建對話管理器，並添加詳細日誌記錄
+def create_dialogue_manager(character: Character, log_dir: str = "logs/api") -> DialogueManager:
+    """創建對話管理器並添加詳細日誌記錄
+    
+    Args:
+        character: 角色對象
+        log_dir: 日誌目錄
+    
+    Returns:
+        DialogueManager 實例
+    """
+    logger.debug(f"創建對話管理器，角色: {character.name}, 類型: {type(character)}")
+    try:
+        manager = DialogueManager(character)
+        logger.debug(f"成功創建對話管理器: {type(manager)}")
+        return manager
+    except Exception as e:
+        logger.error(f"創建對話管理器失敗: {e}", exc_info=True)
+        raise
+
 # API 路由
 @app.post("/api/dialogue/text", response_model=DialogueResponse)
 async def process_text_dialogue(
     request: Request,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    body: dict = Body(
+        ...,  # Ellipsis 表示必填
+        example={}
+    )
 ):
     """處理文本對話請求
 
@@ -573,7 +625,7 @@ async def process_text_dialogue(
     try:
         # 手動解析請求體
         logger.debug("開始處理文本對話請求")
-        body = await request.json()
+        #body = await request.json()
         logger.debug(f"解析後的請求體: {body}")
         
         # 創建請求模型
@@ -587,6 +639,7 @@ async def process_text_dialogue(
         # 檢查 character_config 是否為字符串，若是則嘗試解析為字典
         if character_config and isinstance(character_config, str):
             try:
+                #logger.debug(f"\n\ncharacter_config:\n{character_config}\n\n")
                 logger.info("process_text_dialogue: character_config 是字符串，嘗試解析為 JSON")
                 character_config = json.loads(character_config)
                 logger.info("process_text_dialogue: 成功將 character_config 字符串解析為字典")
@@ -796,7 +849,8 @@ async def process_audio_dialogue(
         state="WAITING_SELECTION",
         dialogue_context="語音選項選擇",
         session_id=session_id,
-        speech_recognition_options=options_list
+        speech_recognition_options=options_list,
+        original_transcription=original_text or None
     )
     
     # 保存語音識別選項到交互日誌
@@ -814,33 +868,116 @@ async def process_audio_dialogue(
     # 直接返回文本回應
     return response
 
-@app.get("/api/health")
-async def health_check():
-    """健康檢查端點"""
-    return {"status": "ok", "active_sessions": len(session_store)}
+@app.post("/api/dialogue/audio_input", response_model=DialogueResponse)
+async def process_audio_input_dialogue(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    audio_file: UploadFile = File(...),
+    character_id: str = Form(...),
+    session_id: Optional[str] = Form(None),
+    character_config_json: Optional[str] = Form(None), 
+):
+    """處理音頻輸入對話請求 (Gemini 直接轉錄 + 對話)"""
+    logger.debug(f"Processing audio input dialogue request (gemini): character_id={character_id}, session_id={session_id}, character_config_json={'provided' if character_config_json else 'not provided'}")
 
-# 添加一個新函數創建對話管理器，並添加詳細日誌記錄
-def create_dialogue_manager(character: Character, log_dir: str = "logs/api") -> DialogueManager:
-    """創建對話管理器並添加詳細日誌記錄
-    
-    Args:
-        character: 角色對象
-        log_dir: 日誌目錄
-    
-    Returns:
-        DialogueManager 實例
-    """
-    logger.debug(f"創建對話管理器，角色: {character.name}, 類型: {type(character)}")
-    
-    # 使用與獨立測試腳本相同的方式創建 DialogueManager
+    # 解析角色配置 JSON
+    character_config = None
+    if character_config_json:
+        try:
+            character_config = json.loads(character_config_json)
+            logger.debug(f"Parsed character_config_json: keys={list(character_config.keys()) if isinstance(character_config, dict) else 'N/A'}")
+        except json.JSONDecodeError:
+            logger.warning("Invalid character_config_json format, ignoring it")
+            character_config = None
+
+    # 會話管理
     try:
-        # 僅使用必要參數
-        manager = DialogueManager(character)
-        logger.debug(f"成功創建對話管理器: {type(manager)}")
-        return manager
+        if session_id and session_id in session_store:
+            session = session_store[session_id]
+            session["last_activity"] = asyncio.get_event_loop().time()
+        else:
+            session_obj = await get_or_create_session(
+                request=request,
+                session_id=session_id,
+                character_id=character_id,
+                character_config=character_config
+            )
+            # 取得新 session_id
+            if not session_id:
+                for sid, sdata in session_store.items():
+                    if sdata is session_obj:
+                        session_id = sid
+                        break
+            session = session_obj
     except Exception as e:
-        logger.error(f"創建對話管理器失敗: {e}", exc_info=True)
+        logger.error(f"Session management error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Session error: {str(e)}")
+
+    # 保存音頻到臨時檔
+    temp_audio_file_path: Optional[str] = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_audio_file:
+            content = await audio_file.read()
+            tmp_audio_file.write(content)
+            temp_audio_file_path = tmp_audio_file.name
+        logger.debug(f"Saved temp audio file: {temp_audio_file_path}")
+    except Exception as e:
+        logger.error(f"Failed saving uploaded audio: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Failed to save audio file: {str(e)}")
+
+    # Gemini 轉錄
+    try:
+        from ..llm.gemini_client import GeminiClient
+        gemini_client = GeminiClient()
+        transcription_json = gemini_client.transcribe_audio(temp_audio_file_path)
+        try:
+            transcription = json.loads(transcription_json)
+        except json.JSONDecodeError:
+            transcription = {"original": transcription_json, "options": [transcription_json]}
+        options = transcription.get("options") or []
+        original_text = transcription.get("original") or (options[0] if options else "")
+        text_input = options[0] if options else original_text
+        if not text_input:
+            raise HTTPException(status_code=400, detail="Unable to transcribe audio")
+        logger.info(f"Gemini transcription selected text: '{text_input}' (options={len(options)})")
+    except HTTPException:
         raise
+    except Exception as e:
+        logger.error(f"Gemini transcription failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Transcription error: {str(e)}")
+
+    # Dialogue processing
+    try:
+        dialogue_manager = session["dialogue_manager"]
+        response_json = await dialogue_manager.process_turn(text_input)
+    except Exception as e:
+        logger.error(f"Dialogue processing failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Dialogue error: {str(e)}")
+
+    # 格式化回應
+    try:
+        formatted_response = await format_dialogue_response(
+            response_json=response_json,
+            session_id=session_id,
+            session=session
+        )
+        # 附加候選選項供前端參考（仍為直接模式，不要求再選）
+        if options:
+            formatted_response.speech_recognition_options = options
+        # 加入原始轉錄文本
+        formatted_response.original_transcription = original_text or None
+        background_tasks.add_task(cleanup_old_sessions, background_tasks)
+        return formatted_response
+    except Exception as e:
+        logger.error(f"Formatting response failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Formatting error: {str(e)}")
+    finally:
+        if temp_audio_file_path and os.path.exists(temp_audio_file_path):
+            try:
+                os.remove(temp_audio_file_path)
+                logger.debug(f"Deleted temp audio file: {temp_audio_file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to delete temp audio file {temp_audio_file_path}: {e}")
 
 @app.post("/api/dialogue/select_response")
 async def select_response(request: SelectResponseRequest):
