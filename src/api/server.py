@@ -19,7 +19,7 @@ from dataclasses import asdict
 import yaml
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Body
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -586,7 +586,11 @@ async def format_dialogue_response(
 @app.post("/api/dialogue/text", response_model=DialogueResponse)
 async def process_text_dialogue(
     request: Request,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    body: dict = Body(
+        ...,  # Ellipsis 表示必填
+        example={}
+    )
 ):
     """處理文本對話請求
 
@@ -600,7 +604,7 @@ async def process_text_dialogue(
     try:
         # 手動解析請求體
         logger.debug("開始處理文本對話請求")
-        body = await request.json()
+        #body = await request.json()
         logger.debug(f"解析後的請求體: {body}")
         
         # 創建請求模型
@@ -614,6 +618,7 @@ async def process_text_dialogue(
         # 檢查 character_config 是否為字符串，若是則嘗試解析為字典
         if character_config and isinstance(character_config, str):
             try:
+                #logger.debug(f"\n\ncharacter_config:\n{character_config}\n\n")
                 logger.info("process_text_dialogue: character_config 是字符串，嘗試解析為 JSON")
                 character_config = json.loads(character_config)
                 logger.info("process_text_dialogue: 成功將 character_config 字符串解析為字典")

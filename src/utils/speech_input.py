@@ -179,27 +179,6 @@ class SpeechInput:
             
         return filename
 
-    def recognize_from_file(self, audio_file_path: str) -> Optional[str]:
-        """從音頻檔案識別語音"""
-        try:
-            with sr.AudioFile(audio_file_path) as source:
-                audio_data = self.recognizer.record(source)  # 讀取整個音頻文件
-            
-            # 使用 Google Speech Recognition
-            text = self.recognizer.recognize_google(audio_data, language='zh-TW')
-            self.debug_print(f"Recognized text from file: {text}")
-            return text
-        except sr.UnknownValueError:
-            self.debug_print(f"Google Speech Recognition could not understand audio from file: {audio_file_path}")
-            return None
-        except sr.RequestError as e:
-            self.debug_print(f"Could not request results from Google Speech Recognition service for file {audio_file_path}; {e}")
-            return None
-        except Exception as e:
-            self.debug_print(f"An error occurred during speech recognition from file {audio_file_path}: {str(e)}")
-            # Potentially re-raise or handle more gracefully depending on desired behavior
-            return None
-
     def __del__(self):
         """清理音訊資源"""
         self.audio.terminate()
