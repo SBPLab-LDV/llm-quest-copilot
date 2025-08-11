@@ -112,6 +112,7 @@ class DialogueResponse(BaseModel):
     dialogue_context: str
     session_id: str
     speech_recognition_options: Optional[List[str]] = None  # 新增: 語音識別可能的選項
+    original_transcription: Optional[str] = None  # 新增: 原始語音轉錄文本
 
 class SelectResponseRequest(BaseModel):
     """選擇回應請求模型"""
@@ -848,7 +849,8 @@ async def process_audio_dialogue(
         state="WAITING_SELECTION",
         dialogue_context="語音選項選擇",
         session_id=session_id,
-        speech_recognition_options=options_list
+        speech_recognition_options=options_list,
+        original_transcription=original_text or None
     )
     
     # 保存語音識別選項到交互日誌
@@ -962,6 +964,8 @@ async def process_audio_input_dialogue(
         # 附加候選選項供前端參考（仍為直接模式，不要求再選）
         if options:
             formatted_response.speech_recognition_options = options
+        # 加入原始轉錄文本
+        formatted_response.original_transcription = original_text or None
         background_tasks.add_task(cleanup_old_sessions, background_tasks)
         return formatted_response
     except Exception as e:
