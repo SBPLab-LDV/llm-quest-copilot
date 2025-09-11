@@ -66,10 +66,13 @@ root_logger.addHandler(console_handler)
 logger = logging.getLogger(__name__)
 
 # 導入現有的對話系統
-from ..core.dialogue import DialogueManager
+from ..core.dialogue_factory import create_dialogue_manager
 from ..core.character import Character
 from ..core.state import DialogueState
 from ..utils.speech_input import SpeechInput
+from ..core.dspy.config import DSPyConfig
+from .performance_monitor import get_performance_monitor
+from .health_monitor import get_health_monitor
 
 # SpeechInput Handler Initialization
 speech_input_handler: Optional[SpeechInput] = None
@@ -113,6 +116,8 @@ class DialogueResponse(BaseModel):
     session_id: str
     speech_recognition_options: Optional[List[str]] = None  # 新增: 語音識別可能的選項
     original_transcription: Optional[str] = None  # 新增: 原始語音轉錄文本
+    implementation_version: Optional[str] = None  # Phase 5: 實現版本標記
+    performance_metrics: Optional[Dict[str, Any]] = None  # Phase 5: 性能指標
 
 class SelectResponseRequest(BaseModel):
     """選擇回應請求模型"""
@@ -287,7 +292,7 @@ async def get_or_create_session(
     
     # 創建對話管理器
     try:
-        dialogue_manager = create_dialogue_manager(
+        dialogue_manager, implementation_version = create_dialogue_manager_with_monitoring(
             character=character_cache[character_id],
             log_dir="logs/api"
         )
@@ -302,6 +307,7 @@ async def get_or_create_session(
     session_store[new_session_id] = {
         "dialogue_manager": dialogue_manager,
         "character_id": character_id,
+        "implementation_version": implementation_version,  # Phase 5: 記錄實現版本
         "created_at": asyncio.get_event_loop().time(),
         "last_activity": asyncio.get_event_loop().time(),
     }
@@ -488,7 +494,8 @@ async def cleanup_old_sessions(background_tasks: BackgroundTasks):
 async def format_dialogue_response(
     response_json: str,
     session_id: Optional[str] = None,
-    session: Optional[Dict[str, Any]] = None
+    session: Optional[Dict[str, Any]] = None,
+    performance_metrics: Optional[Dict[str, Any]] = None
 ) -> DialogueResponse:
     """格式化對話回應
     
@@ -560,6 +567,20 @@ async def format_dialogue_response(
         
         logger.info(f"生成備用回應: {response_dict['responses'][0]}")
     
+    # Phase 5: 準備版本信息和性能指標
+    implementation_version = "original"
+    if session and "implementation_version" in session:
+        implementation_version = session["implementation_version"]
+    
+    # 構建性能指標字典（如果有的話）
+    metrics_dict = None
+    if performance_metrics:
+        metrics_dict = {
+            "response_time": round(performance_metrics.duration, 3),
+            "timestamp": performance_metrics.timestamp.isoformat(),
+            "success": performance_metrics.success
+        }
+    
     # 構建回應對象
     try:
         response = DialogueResponse(
@@ -568,7 +589,9 @@ async def format_dialogue_response(
             state=response_dict["state"],
             dialogue_context=response_dict["dialogue_context"],
             session_id=current_session_id or str(uuid.uuid4()),
-            speech_recognition_options=response_dict.get("speech_recognition_options", None)
+            speech_recognition_options=response_dict.get("speech_recognition_options", None),
+            implementation_version=implementation_version,  # Phase 5: 版本信息
+            performance_metrics=metrics_dict  # Phase 5: 性能指標
         )
         return response
     except Exception as e:
@@ -580,28 +603,185 @@ async def format_dialogue_response(
             state="CONFUSED",
             dialogue_context="錯誤處理",
             session_id=current_session_id or str(uuid.uuid4()),
-            speech_recognition_options=None
+            speech_recognition_options=None,
+            implementation_version=implementation_version,
+            performance_metrics=metrics_dict
         )
 
 # 添加一個新函數創建對話管理器，並添加詳細日誌記錄
-def create_dialogue_manager(character: Character, log_dir: str = "logs/api") -> DialogueManager:
-    """創建對話管理器並添加詳細日誌記錄
+def create_dialogue_manager_with_monitoring(character: Character, log_dir: str = "logs/api") -> tuple:
+    """創建對話管理器並返回實現版本信息
     
     Args:
         character: 角色對象
         log_dir: 日誌目錄
     
     Returns:
-        DialogueManager 實例
+        (DialogueManager 實例, 實現版本字符串)
     """
     logger.debug(f"創建對話管理器，角色: {character.name}, 類型: {type(character)}")
     try:
-        manager = DialogueManager(character)
-        logger.debug(f"成功創建對話管理器: {type(manager)}")
-        return manager
+        # 使用工廠函數創建對話管理器
+        manager = create_dialogue_manager(character, use_terminal=False, log_dir=log_dir)
+        
+        # 檢測實現版本
+        implementation_version = "original"
+        if hasattr(manager, 'dspy_enabled') and manager.dspy_enabled:
+            implementation_version = "dspy"
+        
+        logger.info(f"成功創建對話管理器: {type(manager).__name__} (版本: {implementation_version})")
+        return manager, implementation_version
     except Exception as e:
         logger.error(f"創建對話管理器失敗: {e}", exc_info=True)
         raise
+
+# Phase 5: 性能監控端點
+@app.get("/api/monitor/stats")
+async def get_performance_stats():
+    """獲取性能統計數據"""
+    try:
+        performance_monitor = get_performance_monitor()
+        current_stats = performance_monitor.get_current_stats()
+        
+        return {
+            "status": "success",
+            "stats": {
+                implementation: {
+                    "total_requests": stats.total_requests,
+                    "successful_requests": stats.successful_requests,
+                    "failed_requests": stats.failed_requests,
+                    "avg_response_time": round(stats.avg_response_time, 3),
+                    "error_rate": round(stats.error_rate * 100, 2),  # 轉為百分比
+                    "last_updated": stats.last_updated.isoformat()
+                }
+                for implementation, stats in current_stats.items()
+            }
+        }
+    except Exception as e:
+        logger.error(f"獲取性能統計失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"統計數據獲取失敗: {str(e)}")
+
+@app.get("/api/monitor/comparison")
+async def get_comparison_report():
+    """獲取 DSPy vs 原始實現對比報告"""
+    try:
+        performance_monitor = get_performance_monitor()
+        comparison_report = performance_monitor.get_comparison_report()
+        
+        return {
+            "status": "success",
+            "report": comparison_report
+        }
+    except Exception as e:
+        logger.error(f"獲取對比報告失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"對比報告獲取失敗: {str(e)}")
+
+@app.get("/api/monitor/errors")
+async def get_error_summary(hours: int = 24):
+    """獲取錯誤摘要"""
+    try:
+        performance_monitor = get_performance_monitor()
+        error_summary = performance_monitor.get_error_summary(hours=hours)
+        
+        return {
+            "status": "success",
+            "time_range_hours": hours,
+            "errors": error_summary
+        }
+    except Exception as e:
+        logger.error(f"獲取錯誤摘要失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"錯誤摘要獲取失敗: {str(e)}")
+
+@app.post("/api/monitor/reset")
+async def reset_performance_stats():
+    """重置性能統計數據"""
+    try:
+        performance_monitor = get_performance_monitor()
+        performance_monitor.reset_stats()
+        
+        return {
+            "status": "success",
+            "message": "性能統計數據已重置"
+        }
+    except Exception as e:
+        logger.error(f"重置統計數據失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"重置失敗: {str(e)}")
+
+# Phase 5: 健康監控和回退端點
+@app.get("/api/health/status")
+async def get_health_status():
+    """獲取系統健康狀況"""
+    try:
+        health_monitor = get_health_monitor()
+        performance_monitor = get_performance_monitor()
+        
+        # 執行健康檢查
+        health_statuses = health_monitor.check_health(performance_monitor)
+        monitor_status = health_monitor.get_status()
+        
+        return {
+            "status": "success",
+            "health_statuses": {
+                implementation: {
+                    "is_healthy": status.is_healthy,
+                    "error_rate": round(status.error_rate * 100, 2),
+                    "avg_response_time": round(status.avg_response_time, 3),
+                    "recent_errors": status.recent_errors,
+                    "issues": status.issues,
+                    "last_check": status.last_check.isoformat()
+                }
+                for implementation, status in health_statuses.items()
+            },
+            "monitor_status": monitor_status
+        }
+    except Exception as e:
+        logger.error(f"獲取健康狀況失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"健康檢查失敗: {str(e)}")
+
+@app.post("/api/health/fallback")
+async def manual_fallback(request: dict = Body(...)):
+    """手動觸發或停用回退機制"""
+    try:
+        enable = request.get("enable", False)
+        reason = request.get("reason", "手動操作")
+        
+        health_monitor = get_health_monitor()
+        success = health_monitor.manual_fallback(enable, reason)
+        
+        if success:
+            return {
+                "status": "success",
+                "message": f"回退機制已{'啟用' if enable else '停用'}",
+                "reason": reason
+            }
+        else:
+            raise HTTPException(status_code=500, detail="回退操作失敗")
+            
+    except Exception as e:
+        logger.error(f"手動回退操作失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"回退操作失敗: {str(e)}")
+
+@app.post("/api/health/thresholds")
+async def update_health_thresholds(request: dict = Body(...)):
+    """更新健康檢查閾值"""
+    try:
+        thresholds = request.get("thresholds", {})
+        
+        health_monitor = get_health_monitor()
+        success = health_monitor.update_thresholds(thresholds)
+        
+        if success:
+            return {
+                "status": "success",
+                "message": "健康檢查閾值已更新",
+                "updated_thresholds": thresholds
+            }
+        else:
+            raise HTTPException(status_code=500, detail="閾值更新失敗")
+            
+    except Exception as e:
+        logger.error(f"更新健康檢查閾值失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"閾值更新失敗: {str(e)}")
 
 # API 路由
 @app.post("/api/dialogue/text", response_model=DialogueResponse)
@@ -685,18 +865,44 @@ async def process_text_dialogue(
         # 在調用對話管理器前添加診斷信息
         logger.debug(f"使用的角色信息: id={character_id}, name={session['dialogue_manager'].character.name}")
         
+        # Phase 5: 性能監控 - 開始請求追蹤
+        performance_monitor = get_performance_monitor()
+        implementation_version = session.get("implementation_version", "unknown")
+        monitoring_context = performance_monitor.start_request(
+            implementation=implementation_version,
+            endpoint="text_dialogue",
+            character_id=character_id,
+            session_id=session_id
+        )
+        
         try:
             # 調用對話管理器處理用戶輸入
             dialogue_manager = session["dialogue_manager"]
-            logger.debug(f"調用對話管理器處理: '{text}'")
+            logger.debug(f"調用對話管理器處理: '{text}' (實現版本: {implementation_version})")
             
             # 直接使用對話管理器處理
             response_json = await dialogue_manager.process_turn(text)
             logger.debug(f"對話管理器返回結果: {response_json}")
+            
+            # Phase 5: 性能監控 - 記錄成功
+            performance_metrics = performance_monitor.end_request(
+                context=monitoring_context,
+                success=True,
+                response_length=len(str(response_json))
+            )
+            
         except Exception as e:
             logger.error(f"對話管理器處理輸入時出錯: {e}", exc_info=True)
             # 記錄詳細的堆疊跟踪
             logger.error(f"詳細錯誤堆疊: {traceback.format_exc()}")
+            
+            # Phase 5: 性能監控 - 記錄失敗
+            performance_monitor.end_request(
+                context=monitoring_context,
+                success=False,
+                error_message=str(e)
+            )
+            
             raise HTTPException(
                 status_code=500,
                 detail=f"對話處理失敗: {str(e)}"
@@ -710,9 +916,10 @@ async def process_text_dialogue(
             response = await format_dialogue_response(
                 response_json=response_json,
                 session_id=session_id,
-                session=session
+                session=session,
+                performance_metrics=performance_metrics  # Phase 5: 傳遞性能指標
             )
-            logger.debug(f"返回回應: {response}")
+            logger.debug(f"返回回應: {response} (版本: {implementation_version})")
         except Exception as e:
             logger.error(f"格式化回應時出錯: {e}", exc_info=True)
             # 記錄詳細的堆疊跟踪
@@ -946,12 +1153,38 @@ async def process_audio_input_dialogue(
         logger.error(f"Gemini transcription failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Transcription error: {str(e)}")
 
+    # Phase 5: 音頻對話性能監控
+    performance_monitor = get_performance_monitor()
+    implementation_version = session.get("implementation_version", "unknown")
+    monitoring_context = performance_monitor.start_request(
+        implementation=implementation_version,
+        endpoint="audio_dialogue",
+        character_id=character_id,
+        session_id=session_id
+    )
+    
     # Dialogue processing
     try:
         dialogue_manager = session["dialogue_manager"]
         response_json = await dialogue_manager.process_turn(text_input)
+        
+        # Phase 5: 記錄成功
+        performance_metrics = performance_monitor.end_request(
+            context=monitoring_context,
+            success=True,
+            response_length=len(str(response_json))
+        )
+        
     except Exception as e:
         logger.error(f"Dialogue processing failed: {e}", exc_info=True)
+        
+        # Phase 5: 記錄失敗
+        performance_monitor.end_request(
+            context=monitoring_context,
+            success=False,
+            error_message=str(e)
+        )
+        
         raise HTTPException(status_code=500, detail=f"Dialogue error: {str(e)}")
 
     # 格式化回應
@@ -959,7 +1192,8 @@ async def process_audio_input_dialogue(
         formatted_response = await format_dialogue_response(
             response_json=response_json,
             session_id=session_id,
-            session=session
+            session=session,
+            performance_metrics=performance_metrics  # Phase 5: 傳遞性能指標
         )
         # 附加候選選項供前端參考（仍為直接模式，不要求再選）
         if options:
@@ -1073,9 +1307,37 @@ async def select_response(request: SelectResponseRequest):
                 "dialogue_context": "語音識別選擇完成"
             }
         
+        # Phase 5: 選擇回應性能監控
+        performance_monitor = get_performance_monitor()
+        implementation_version = session.get("implementation_version", "unknown")
+        character_id = session.get("character_id", "unknown")
+        monitoring_context = performance_monitor.start_request(
+            implementation=implementation_version,
+            endpoint="select_response",
+            character_id=character_id,
+            session_id=request.session_id
+        )
+        
         # 如果不是語音識別後的選擇，正常處理
         logger.info(f"處理選擇的回應，發送到 Gemini API: {request.selected_response}")
-        response_json = await dialogue_manager.process_turn(request.selected_response)
+        try:
+            response_json = await dialogue_manager.process_turn(request.selected_response)
+            
+            # Phase 5: 記錄成功
+            performance_metrics = performance_monitor.end_request(
+                context=monitoring_context,
+                success=True,
+                response_length=len(str(response_json))
+            )
+            
+        except Exception as e:
+            # Phase 5: 記錄失敗
+            performance_monitor.end_request(
+                context=monitoring_context,
+                success=False,
+                error_message=str(e)
+            )
+            raise
         
         logger.debug(f"成功記錄選擇的回應: {request.selected_response}")
         logger.debug(f"對話管理器處理結果: {response_json}")
