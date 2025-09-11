@@ -20,7 +20,11 @@ class GeminiClient:
             # 詳細記錄發送給 API 的請求
             self.logger.info(f"===== 發送請求到 Gemini API =====")
             self.logger.info(f"模型: gemini-2.0-flash-exp")
-            self.logger.debug(f"提示詞: {prompt[:100]}... (截斷顯示)")
+            # 安全地處理 prompt 日誌
+            if isinstance(prompt, str):
+                self.logger.debug(f"提示詞: {prompt[:100]}... (截斷顯示)")
+            else:
+                self.logger.debug(f"提示詞類型: {type(prompt)}, 內容: {str(prompt)[:100]}... (截斷顯示)")
             
             # 設定生成參數以確保更好的格式控制
             generation_config = {

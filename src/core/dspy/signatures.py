@@ -25,6 +25,7 @@ class PatientResponseSignature(dspy.Signature):
     conversation_history = dspy.InputField(desc="最近的對話歷史，以換行分隔")
     
     # 輸出欄位 - 病患的回應
+    reasoning = dspy.OutputField(desc="推理過程和思考步驟")
     responses = dspy.OutputField(desc="5個不同的病患回應選項，每個都應該是完整的句子，格式為JSON陣列")
     state = dspy.OutputField(desc="對話狀態：必須是 NORMAL、CONFUSED、TRANSITIONING 或 TERMINATED 其中之一")
     dialogue_context = dspy.OutputField(desc="當前對話情境，如：醫師查房、病房日常、生命徵象相關、身體評估等")
@@ -41,6 +42,7 @@ class ContextClassificationSignature(dspy.Signature):
     conversation_history = dspy.InputField(desc="對話歷史")
     
     # 輸出欄位
+    reasoning = dspy.OutputField(desc="分類的推理過程")
     context = dspy.OutputField(desc="識別出的對話情境名稱")
     confidence = dspy.OutputField(desc="分類信心度，0.0到1.0之間")
 

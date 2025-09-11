@@ -70,7 +70,7 @@ class DSPyGeminiLM(dspy.LM):
         """
         return self._call_gemini(prompt, **kwargs)
     
-    def __call__(self, prompt: Union[str, List[str]], **kwargs) -> Union[str, List[str]]:
+    def __call__(self, prompt: Union[str, List[str]] = None, **kwargs) -> Union[str, List[str]]:
         """主要調用方法 - DSPy 的標準接口
         
         Args:
@@ -83,14 +83,33 @@ class DSPyGeminiLM(dspy.LM):
         start_time = time.time()
         
         try:
+            # 檢查是否缺少 prompt
+            if prompt is None:
+                logger.warning("DSPyGeminiLM.__call__ 收到 None prompt，檢查 kwargs")
+                logger.debug(f"kwargs 內容: {kwargs}")
+                
+                # 嘗試從 kwargs 中獲取 prompt
+                if 'messages' in kwargs:
+                    # 處理 ChatML 格式的 messages
+                    messages = kwargs['messages']
+                    prompt = self._convert_messages_to_prompt(messages)
+                elif 'query' in kwargs:
+                    prompt = kwargs['query']
+                elif 'text' in kwargs:
+                    prompt = kwargs['text']
+                else:
+                    raise ValueError("未找到 prompt 參數，無法處理請求")
+            
             # 處理單個提示
             if isinstance(prompt, str):
+                logger.debug(f"處理單個提示: {prompt[:100]}...")
                 response = self._call_gemini(prompt, **kwargs)
                 self._update_stats(start_time, success=True)
                 return response
             
             # 處理多個提示
             elif isinstance(prompt, list):
+                logger.debug(f"處理批量提示: {len(prompt)} 個")
                 responses = []
                 for p in prompt:
                     response = self._call_gemini(p, **kwargs)
@@ -105,6 +124,37 @@ class DSPyGeminiLM(dspy.LM):
             self._update_stats(start_time, success=False)
             logger.error(f"DSPy Gemini 調用失敗: {e}")
             raise
+    
+    def _convert_messages_to_prompt(self, messages) -> str:
+        """將 ChatML 格式的 messages 轉換為單個 prompt 字符串
+        
+        Args:
+            messages: ChatML 格式的消息列表
+            
+        Returns:
+            合併後的 prompt 字符串
+        """
+        if isinstance(messages, list):
+            prompt_parts = []
+            for msg in messages:
+                if isinstance(msg, dict) and 'content' in msg:
+                    role = msg.get('role', '')
+                    content = msg.get('content', '')
+                    
+                    if role == 'system':
+                        prompt_parts.append(f"System: {content}")
+                    elif role == 'user':
+                        prompt_parts.append(f"User: {content}")
+                    elif role == 'assistant':
+                        prompt_parts.append(f"Assistant: {content}")
+                    else:
+                        prompt_parts.append(content)
+                else:
+                    prompt_parts.append(str(msg))
+            
+            return "\n\n".join(prompt_parts)
+        else:
+            return str(messages)
     
     def _call_gemini(self, prompt: str, **kwargs) -> str:
         """調用 Gemini API

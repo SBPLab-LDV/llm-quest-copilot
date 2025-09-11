@@ -98,6 +98,7 @@ class DialogueManagerDSPy(DialogueManager):
                 character_name=self.character.name,
                 character_persona=self.character.persona,
                 character_backstory=self.character.backstory,
+                character_goal=self.character.goal,
                 character_details=self._get_character_details(),
                 conversation_history=self._format_conversation_history()
             )
