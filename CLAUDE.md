@@ -1,5 +1,83 @@
 # LLM Quest DSPy Project Memory
 
+## 專案開發規範
+
+### Git Commit 規範 - 實驗驱動開發
+**每個 commit 都必須是一個獨立可測試的實驗單元**
+
+#### Commit Message 結構要求
+每個 commit message 必須包含以下結構：
+
+```
+experiment: [實驗目標] - [具體功能描述]
+
+Test Hypothesis: [實驗假設，必須是可測試和驗證的]
+
+Implementation:
+- [具體實現內容 1]
+- [具體實現內容 2]
+- [技術細節和架構變更]
+
+Test Steps Executed:
+1. docker exec dialogue-server-jiawei-dspy python /app/[測試腳本]
+2. [具體執行的測試步驟 2]
+3. [具體執行的測試步驟 3]
+4. [驗證步驟]
+5. [回歸測試或性能測試]
+
+ACTUAL TEST RESULTS:
+✅ SUCCESSES:
+- [成功的測試結果 1]
+- [量化的性能指標]
+- [功能驗證結果]
+
+❌ ERRORS ENCOUNTERED:
+- [具體錯誤描述和錯誤代碼]
+- [錯誤影響範圍分析]
+- [失敗的測試案例]
+
+ERROR DETAILS:
+- Location: [錯誤發生的檔案和函數]
+- Root Cause: [根本原因分析]
+- Impact: [影響評估]
+- Severity: [嚴重程度: LOW/MEDIUM/HIGH/CRITICAL]
+
+DETAILED LOGS:
+```
+[關鍵的測試執行日誌片段]
+[錯誤堆疊追踪]
+[重要的除錯輸出]
+```
+
+Technical Details:
+- Files: [修改的檔案清單與行數變更]
+- Test Coverage: [測試覆蓋率和結果]
+- Performance: [性能指標變化]
+- Regression: [回歸測試結果]
+
+Experiment Status: [✅ SUCCESSFUL / ⚠️ PARTIAL SUCCESS / ❌ FAILED]
+- [狀態詳細說明]
+- [後續所需修復項目]
+
+🤖 Generated with [Claude Code](https://claude.ai/code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+#### 實驗驅動開發原則
+1. **實驗假設先行**: 每個 commit 都要有明確可測試的假設
+2. **測試步驟記錄**: 所有測試命令和操作步驟必須被詳實記錄
+3. **結果量化記錄**: 成功和失敗都要有具體的數據和日誌
+4. **錯誤詳實分析**: 包含錯誤類型、位置、影響範圍和解決方案
+5. **可重現性**: 任何人都能根據記錄重現測試和驗證結果
+
+#### 測試腳本要求
+每個實驗性 commit 都應該包含：
+- 專屬的測試腳本（如 `test_[功能名]_[日期].py`）
+- Docker 容器內的測試執行命令
+- 自動化的驗證和報告機制
+- 錯誤處理和日誌記錄功能
+
 ## 重要執行環境要求
 
 ### Docker Container 執行
@@ -85,14 +163,23 @@ docker exec dialogue-server-jiawei-dspy python /app/<script_name>.py
 - 當前分支: `feature/dspy-refactor`
 - 主分支: `main`（通常用於 PR）
 
-## 最近提交
-- feat: add testing framework and Excel processing utility
-- feat: add GUI components and UI launcher scripts
-- feat: add UI and audio processing dependencies
-- feat: upgrade Docker environment and add entrypoint script
-- fix: update speech recognition options count from 5 to 4
 
 ## 除錯和測試
+
+### 實驗性測試腳本執行
+```bash
+# 統一對話模組測試
+docker exec dialogue-server-jiawei-dspy python /app/test_unified_optimization.py
+
+# 工廠模式 A/B 測試
+docker exec dialogue-server-jiawei-dspy python /app/test_factory_optimization.py
+
+# API 管理器調試
+docker exec dialogue-server-jiawei-dspy python /app/debug_api_manager.py
+
+# 完整回歸測試套件
+docker exec dialogue-server-jiawei-dspy python /app/run_tests.py
+```
 
 ### 測試配置處理
 ```bash
