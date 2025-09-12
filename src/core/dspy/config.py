@@ -70,6 +70,7 @@ class DSPyConfig:
                 'top_p': 0.8,
                 'top_k': 40,
                 'max_output_tokens': 2048,
+                'use_unified_module': False,  # 統一對話模組優化
                 'ab_testing': {
                     'enabled': False,
                     'percentage': 50
@@ -106,6 +107,14 @@ class DSPyConfig:
             True 如果啟用優化
         """
         return self.get_dspy_config().get('optimize', False)
+    
+    def is_unified_module_enabled(self) -> bool:
+        """檢查是否啟用統一對話模組優化
+        
+        Returns:
+            True 如果啟用統一模組（節省 66.7% API 調用）
+        """
+        return self.get_dspy_config().get('use_unified_module', False)
     
     def get_model_config(self) -> Dict[str, Any]:
         """獲取模型配置
@@ -185,6 +194,10 @@ def reload_global_config() -> None:
 def is_dspy_enabled() -> bool:
     """檢查是否啟用 DSPy"""
     return get_config().is_dspy_enabled()
+
+def is_unified_module_enabled() -> bool:
+    """檢查是否啟用統一對話模組優化"""
+    return get_config().is_unified_module_enabled()
 
 def get_model_config() -> Dict[str, Any]:
     """獲取模型配置"""

@@ -22,7 +22,7 @@ class DSPyGeminiLM(dspy.LM):
     """
     
     def __init__(self, 
-                 model: str = "gemini-2.0-flash-exp",
+                 model: str = "gemini-2.0-flash",
                  temperature: float = 0.9,
                  top_p: float = 0.8,
                  top_k: int = 40,
@@ -86,18 +86,29 @@ class DSPyGeminiLM(dspy.LM):
             # 檢查是否缺少 prompt
             if prompt is None:
                 logger.warning("DSPyGeminiLM.__call__ 收到 None prompt，檢查 kwargs")
-                logger.debug(f"kwargs 內容: {kwargs}")
+                logger.info(f"=== KWARGS 詳細內容檢查 ===")
+                for key, value in kwargs.items():
+                    logger.info(f"  {key}: {str(value)[:200]}...")
+                logger.info(f"=== END KWARGS 詳細內容 ===")
                 
-                # 嘗試從 kwargs 中獲取 prompt
+                # 嘗試從 kwargs 中獲取 prompt - 增強版
                 if 'messages' in kwargs:
                     # 處理 ChatML 格式的 messages
                     messages = kwargs['messages']
                     prompt = self._convert_messages_to_prompt(messages)
+                    logger.info(f"從 messages 提取 prompt: {prompt[:200]}...")
                 elif 'query' in kwargs:
                     prompt = kwargs['query']
+                    logger.info(f"從 query 提取 prompt: {prompt[:200]}...")
                 elif 'text' in kwargs:
                     prompt = kwargs['text']
+                    logger.info(f"從 text 提取 prompt: {prompt[:200]}...")
+                elif 'prompt' in kwargs:
+                    prompt = kwargs['prompt']
+                    logger.info(f"從 prompt 參數提取: {prompt[:200]}...")
                 else:
+                    logger.error(f"無法從任何 kwargs 參數中找到 prompt！")
+                    logger.error(f"可用的 kwargs 鍵: {list(kwargs.keys())}")
                     raise ValueError("未找到 prompt 參數，無法處理請求")
             
             # 處理單個提示
@@ -172,8 +183,21 @@ class DSPyGeminiLM(dspy.LM):
             logger.debug(f"DSPy -> Gemini 調用 #{self.call_count}")
             logger.debug(f"提示長度: {len(prompt)} 字符")
             
+            # ====== 詳細日誌追蹤 - GEMINI PROMPT INPUT ======
+            logger.info(f"=== GEMINI PROMPT INPUT (Call #{self.call_count}) ===")
+            logger.info(f"Prompt length: {len(prompt)} characters")
+            logger.info(f"Full prompt content:\n{prompt}")
+            logger.info(f"Call kwargs: {kwargs}")
+            logger.info(f"=== END GEMINI PROMPT INPUT ===")
+            
             # 調用現有的 GeminiClient
             response = self.gemini_client.generate_response(prompt)
+            
+            # ====== 詳細日誌追蹤 - GEMINI RESPONSE OUTPUT ======
+            logger.info(f"=== GEMINI RESPONSE OUTPUT (Call #{self.call_count}) ===")
+            logger.info(f"Response length: {len(response)} characters")
+            logger.info(f"Full response content:\n{response}")
+            logger.info(f"=== END GEMINI RESPONSE OUTPUT ===")
             
             # 記錄成功
             logger.debug(f"Gemini 回應長度: {len(response)} 字符")

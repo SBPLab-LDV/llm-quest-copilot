@@ -495,7 +495,8 @@ async def format_dialogue_response(
     response_json: str,
     session_id: Optional[str] = None,
     session: Optional[Dict[str, Any]] = None,
-    performance_metrics: Optional[Dict[str, Any]] = None
+    performance_metrics: Optional[Dict[str, Any]] = None,
+    dialogue_manager: Optional[Any] = None
 ) -> DialogueResponse:
     """格式化對話回應
     
@@ -580,6 +581,18 @@ async def format_dialogue_response(
             "timestamp": performance_metrics.timestamp.isoformat(),
             "success": performance_metrics.success
         }
+        
+        # 如果是優化版本，添加 API 調用節省統計
+        if implementation_version == "optimized" and hasattr(dialogue_manager, 'get_optimization_statistics'):
+            try:
+                opt_stats = dialogue_manager.get_optimization_statistics()
+                metrics_dict.update({
+                    "api_calls_saved": opt_stats.get('api_calls_saved', 0),
+                    "efficiency_improvement": opt_stats.get('efficiency_summary', {}).get('efficiency_improvement', 'N/A'),
+                    "conversations_processed": opt_stats.get('total_conversations', 0)
+                })
+            except Exception as e:
+                logger.warning(f"無法獲取優化統計: {e}")
     
     # 構建回應對象
     try:
@@ -626,7 +639,9 @@ def create_dialogue_manager_with_monitoring(character: Character, log_dir: str =
         
         # 檢測實現版本
         implementation_version = "original"
-        if hasattr(manager, 'dspy_enabled') and manager.dspy_enabled:
+        if hasattr(manager, 'optimization_enabled') and manager.optimization_enabled:
+            implementation_version = "optimized"
+        elif hasattr(manager, 'dspy_enabled') and manager.dspy_enabled:
             implementation_version = "dspy"
         
         logger.info(f"成功創建對話管理器: {type(manager).__name__} (版本: {implementation_version})")
@@ -917,7 +932,8 @@ async def process_text_dialogue(
                 response_json=response_json,
                 session_id=session_id,
                 session=session,
-                performance_metrics=performance_metrics  # Phase 5: 傳遞性能指標
+                performance_metrics=performance_metrics,  # Phase 5: 傳遞性能指標
+                dialogue_manager=dialogue_manager  # 傳遞對話管理器以獲取優化統計
             )
             logger.debug(f"返回回應: {response} (版本: {implementation_version})")
         except Exception as e:
@@ -1193,7 +1209,8 @@ async def process_audio_input_dialogue(
             response_json=response_json,
             session_id=session_id,
             session=session,
-            performance_metrics=performance_metrics  # Phase 5: 傳遞性能指標
+            performance_metrics=performance_metrics,  # Phase 5: 傳遞性能指標
+            dialogue_manager=dialogue_manager  # 傳遞對話管理器以獲取優化統計
         )
         # 附加候選選項供前端參考（仍為直接模式，不要求再選）
         if options:

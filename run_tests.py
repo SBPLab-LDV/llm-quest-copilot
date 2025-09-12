@@ -158,6 +158,36 @@ except Exception as e:
 # 使用示例
 print(f"\n開始與角色 ID '{char_id_to_use}' 對話:")
 
+# 多輪對話測試（文本回覆）
+print("\n----- 多輪對話測試（文本回覆）-----")
+
+multi_turn_session_id = None
+test_conversations = [
+    "你好，感覺怎麼樣？",
+    "有沒有覺得發燒或不舒服？", 
+    "從什麼時候開始的？",
+    "還有其他症狀嗎？",
+    "那我們安排一些檢查好嗎？"
+]
+
+print(f"將進行 {len(test_conversations)} 輪連續對話測試...")
+
+for i, conversation_text in enumerate(test_conversations):
+    print(f"\n----- 第 {i+1} 輪對話 -----")
+    print(f"護理人員: {conversation_text}")
+    
+    # 發送文本對話請求
+    multi_turn_result = text_dialogue(conversation_text, char_id_to_use, multi_turn_session_id)
+    print(json.dumps(multi_turn_result, indent=2, ensure_ascii=False))
+    
+    # 獲取或更新會話ID（用於後續請求）
+    if "session_id" in multi_turn_result:
+        multi_turn_session_id = multi_turn_result["session_id"]
+        print(f"使用會話ID: {multi_turn_session_id}")
+    else:
+        print("警告: 回應中沒有會話ID，無法繼續多輪對話測試")
+        break
+
 # 測試音頻上傳功能 (獲取文本回覆)
 print("\n----- 音頻對話測試（文本回覆）-----")
 

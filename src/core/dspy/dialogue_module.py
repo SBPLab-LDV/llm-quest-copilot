@@ -252,6 +252,19 @@ class DSPyDialogueModule(dspy.Module):
             # 格式化對話歷史
             formatted_history = "\n".join(conversation_history[-5:])
             
+            # ====== 詳細日誌追蹤 - DSPy SIGNATURE EXECUTION ======
+            logger.info(f"=== DSPy SIGNATURE EXECUTION ===")
+            logger.info(f"Input parameters:")
+            logger.info(f"  user_input: {user_input}")
+            logger.info(f"  character_name: {character_name}")
+            logger.info(f"  character_persona: {character_persona}")
+            logger.info(f"  character_backstory: {character_backstory}")
+            logger.info(f"  character_goal: {character_goal}")
+            logger.info(f"  character_details: {character_details}")
+            logger.info(f"  formatted_history: {formatted_history}")
+            logger.info(f"  relevant_examples count: {len(relevant_examples)}")
+            logger.info(f"=== CALLING DSPy PatientResponseSignature ===")
+            
             # TODO: 將 relevant_examples 整合到 prompt 中
             # 目前先直接呼叫 response generator
             
@@ -264,6 +277,18 @@ class DSPyDialogueModule(dspy.Module):
                 character_details=character_details,
                 conversation_history=formatted_history
             )
+            
+            # ====== 詳細日誌追蹤 - DSPy SIGNATURE RESULT ======
+            logger.info(f"=== DSPy SIGNATURE PREDICTION RESULT ===")
+            logger.info(f"  prediction type: {type(prediction)}")
+            logger.info(f"  prediction attributes: {dir(prediction)}")
+            if hasattr(prediction, 'responses'):
+                logger.info(f"  responses: {prediction.responses}")
+            if hasattr(prediction, 'state'):
+                logger.info(f"  state: {prediction.state}")
+            if hasattr(prediction, 'dialogue_context'):
+                logger.info(f"  dialogue_context: {prediction.dialogue_context}")
+            logger.info(f"=== END DSPy SIGNATURE RESULT ===")
             
             # 處理回應格式
             responses = self._process_responses(prediction.responses)
@@ -280,12 +305,26 @@ class DSPyDialogueModule(dspy.Module):
             return processed_prediction
             
         except Exception as e:
-            logger.error(f"回應生成失敗: {e}")
-            # 返回預設回應
+            # ====== 詳細異常日誌追蹤 ======
+            logger.error(f"=== DSPy SIGNATURE EXECUTION FAILED ===")
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.error(f"Exception message: {str(e)}")
+            logger.error(f"Input that caused failure:")
+            logger.error(f"  user_input: {user_input}")
+            logger.error(f"  character_name: {character_name}")
+            import traceback
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
+            logger.error(f"=== END DSPy SIGNATURE FAILURE ===")
+            
+            # 返回預設回應 - 添加錯誤信息以便調試
             return dspy.Prediction(
-                responses=["我需要一點時間思考...", "能否再說一遍？", "讓我想想該怎麼回答"],
-                state="NORMAL",
-                dialogue_context="一般對話"
+                responses=[
+                    f"系統調試：DSPy生成失敗 - {type(e).__name__}",
+                    "我需要一點時間思考...", 
+                    "能否再說一遍？"
+                ],
+                state="CONFUSED",
+                dialogue_context=f"系統錯誤: {str(e)[:50]}..."
             )
     
     def _determine_state_transition(self, user_input: str, current_state: str,

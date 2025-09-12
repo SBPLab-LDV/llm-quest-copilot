@@ -22,10 +22,10 @@ def create_dialogue_manager(character: Character,
         character: 角色實例
         use_terminal: 是否使用終端模式
         log_dir: 日誌目錄
-        force_implementation: 強制使用特定實現 ("original", "dspy", None=auto)
+        force_implementation: 強制使用特定實現 ("original", "dspy", "optimized", None=auto)
         
     Returns:
-        DialogueManager 實例（原始版本或 DSPy 版本）
+        DialogueManager 實例（原始版本、DSPy 版本或優化版本）
         
     Raises:
         ImportError: 當請求的實現無法導入時
@@ -45,6 +45,9 @@ def create_dialogue_manager(character: Character,
         elif force_implementation.lower() == "dspy":
             logger.info("Forced to use DSPy DialogueManager")
             return _create_dspy_manager(character, use_terminal, log_dir)
+        elif force_implementation.lower() == "optimized":
+            logger.info("Forced to use Optimized DSPy DialogueManager")
+            return _create_optimized_dspy_manager(character, use_terminal, log_dir)
         else:
             raise ValueError(f"Invalid force_implementation: {force_implementation}")
     
@@ -55,8 +58,13 @@ def create_dialogue_manager(character: Character,
         
         config = DSPyConfig()
         if config.is_dspy_enabled():
-            logger.info("DSPy enabled in config - creating DSPy DialogueManager")
-            return _create_dspy_manager(character, use_terminal, log_dir)
+            # 檢查是否啟用統一模組優化
+            if hasattr(config, 'is_unified_module_enabled') and config.is_unified_module_enabled():
+                logger.info("DSPy enabled with unified module - creating Optimized DSPy DialogueManager")
+                return _create_optimized_dspy_manager(character, use_terminal, log_dir)
+            else:
+                logger.info("DSPy enabled - creating DSPy DialogueManager")
+                return _create_dspy_manager(character, use_terminal, log_dir)
         else:
             logger.info("DSPy disabled in config - creating original DialogueManager")
             return _create_original_manager(character, use_terminal, log_dir)
@@ -112,6 +120,30 @@ def _create_dspy_manager(character: Character,
         return _create_original_manager(character, use_terminal, log_dir)
 
 
+def _create_optimized_dspy_manager(character: Character, 
+                                  use_terminal: bool, 
+                                  log_dir: str) -> DialogueManager:
+    """創建優化版 DSPy 對話管理器（統一模組，節省 66.7% API 調用）"""
+    logger = logging.getLogger(__name__)
+    
+    try:
+        from .dspy.optimized_dialogue_manager import OptimizedDialogueManagerDSPy
+        
+        manager = OptimizedDialogueManagerDSPy(character, use_terminal, log_dir)
+        logger.debug(f"Optimized DSPy DialogueManager created successfully")
+        return manager
+        
+    except ImportError as e:
+        logger.error(f"Failed to import Optimized DSPy DialogueManager: {e}")
+        logger.warning("Falling back to regular DSPy DialogueManager")
+        return _create_dspy_manager(character, use_terminal, log_dir)
+        
+    except Exception as e:
+        logger.error(f"Failed to create Optimized DSPy DialogueManager: {e}")
+        logger.warning("Falling back to regular DSPy DialogueManager")
+        return _create_dspy_manager(character, use_terminal, log_dir)
+
+
 def get_available_implementations() -> Dict[str, Dict[str, Any]]:
     """獲取可用的對話管理器實現資訊
     
@@ -155,6 +187,28 @@ def get_available_implementations() -> Dict[str, Dict[str, Any]]:
             "description": "DSPy 框架對話管理器實現"
         }
     
+    # 檢查優化版 DSPy 實現
+    try:
+        from .dspy.optimized_dialogue_manager import OptimizedDialogueManagerDSPy
+        from .dspy.config import DSPyConfig
+        
+        config = DSPyConfig()
+        unified_enabled = hasattr(config, 'is_unified_module_enabled') and config.is_unified_module_enabled()
+        implementations["optimized"] = {
+            "available": True,
+            "class": OptimizedDialogueManagerDSPy,
+            "enabled": config.is_dspy_enabled() and unified_enabled,
+            "description": "優化版 DSPy 對話管理器（統一模組，節省 66.7% API 調用）",
+            "api_calls_per_conversation": 1,
+            "efficiency_improvement": "66.7%"
+        }
+    except ImportError as e:
+        implementations["optimized"] = {
+            "available": False,
+            "error": str(e),
+            "description": "優化版 DSPy 對話管理器（統一模組，節省 66.7% API 調用）"
+        }
+    
     logger.debug(f"Available implementations: {list(implementations.keys())}")
     return implementations
 
@@ -186,6 +240,15 @@ def get_current_implementation_info(manager: DialogueManager) -> Dict[str, Any]:
                 info["dspy_stats"] = manager.get_dspy_statistics()
             except Exception as e:
                 info["dspy_stats_error"] = str(e)
+    elif manager.__class__.__name__ == "OptimizedDialogueManagerDSPy":
+        info["type"] = "optimized"
+        
+        # 獲取優化版特定資訊
+        if hasattr(manager, 'get_optimization_statistics'):
+            try:
+                info["optimization_stats"] = manager.get_optimization_statistics()
+            except Exception as e:
+                info["optimization_stats_error"] = str(e)
     
     return info
 
@@ -243,6 +306,12 @@ def test_implementations() -> Dict[str, Dict[str, Any]]:
                 stats = manager.get_dspy_statistics()
                 test_result["dspy_stats"] = stats
                 test_result["dspy_enabled"] = getattr(manager, 'dspy_enabled', False)
+            
+            # 優化版特定測試
+            if impl_name == "optimized" and hasattr(manager, 'get_optimization_statistics'):
+                opt_stats = manager.get_optimization_statistics()
+                test_result["optimization_stats"] = opt_stats
+                test_result["optimization_enabled"] = getattr(manager, 'optimization_enabled', False)
             
             # 清理
             if hasattr(manager, 'cleanup'):
