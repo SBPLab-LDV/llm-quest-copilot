@@ -19,15 +19,37 @@ logger = logging.getLogger(__name__)
 
 
 class UnifiedPatientResponseSignature(dspy.Signature):
-    """統一的病患回應生成簽名 - 智能上下文管理版本
+    """統一的病患回應生成簽名 - JSON 輸出版本
     
     將情境分類、回應生成、狀態判斷合併為單一調用，
-    減少 API 使用次數從 3次 降低到 1次。
+    減少 API 使用次數從 3 次降至 1 次。
     
-    核心原則：
-    1. 以已建立的病患角色自然回應
-    2. 避免不必要的自我介紹
-    3. 保持角色一致性和對話流暢度
+    【輸出格式要求 - 重要】
+    - 僅輸出「單一有效 JSON 物件」，不允許任何額外文字或 markdown 代碼塊（如 ``` 或 ```json）。
+    - 必須包含且只包含以下鍵（鍵名需精確匹配）：
+      reasoning, character_consistency_check, context_classification, confidence,
+      responses, state, dialogue_context, state_reasoning。
+    - responses 必須是字串陣列（5 個不同、自然的句子）。
+    - confidence 使用字串型態的數值（如 "0.90"，範圍 0.80–0.98）。
+    - state 僅在「完全無法辨識或毫無語義」時才可為 CONFUSED；一般情況請輸出 NORMAL。
+    - 若生成過程中發現缺少任何必填鍵或格式錯誤，請自行修正並重新輸出完整 JSON（不要輸出中間稿）。
+    
+    【正確 JSON 範例】
+    {
+      "reasoning": "詳細推理過程...",
+      "character_consistency_check": "YES",
+      "context_classification": "daily_routine_examples",
+      "confidence": "0.90",
+      "responses": ["回應1", "回應2", "回應3", "回應4", "回應5"],
+      "state": "NORMAL",
+      "dialogue_context": "病房日常對話",
+      "state_reasoning": "選擇 NORMAL 的原因說明"
+    }
+    
+    【禁止事項】
+    - 不要輸出 field header（如 [[ ## field ## ]]）。
+    - 不要輸出任何多餘的說明或標記（僅允許 JSON 物件）。
+    - 不要使用單引號包裹鍵或值（必須是雙引號）。
     """
     
     # 輸入欄位 - 護理人員和對話相關信息
@@ -41,11 +63,11 @@ class UnifiedPatientResponseSignature(dspy.Signature):
     available_contexts = dspy.InputField(desc="可用的對話情境列表")
     
     # 輸出欄位 - 統一的回應結果  
-    reasoning = dspy.OutputField(desc="推理過程：包含情境分析、角色一致性檢查、回應思考和狀態評估。必須確認不會進行自我介紹。")
+    reasoning = dspy.OutputField(desc="推理過程：包含情境分析、角色一致性檢查、回應思考和狀態評估。必須確認不會進行自我介紹。【重要】邏輯一致性檢查：1) 仔細檢視對話歷史中的所有事實陳述（症狀、時間、治療狀況等）；2) 確認新回應不會與之前提到的任何醫療事實產生矛盾；3) 特別注意症狀描述、疼痛程度、發燒狀況、服藥情形等細節的前後一致性；4) 如發現潛在矛盾，必須調整回應以維持邏輯一致性；5) 明確說明檢查結果和調整內容。")
     character_consistency_check = dspy.OutputField(desc="角色一致性檢查：確認回應符合已建立的角色人格，不包含自我介紹。回答 YES 或 NO")
     context_classification = dspy.OutputField(desc="對話情境分類：vital_signs_examples, daily_routine_examples, treatment_examples 等")
     confidence = dspy.OutputField(desc="情境分類的信心度，0.0到1.0之間")
-    responses = dspy.OutputField(desc="5個不同的病患回應選項，每個都應該是完整的句子，格式為JSON陣列。以已建立的病患角色身份自然回應，避免自我介紹。")
+    responses = dspy.OutputField(desc="5個不同的病患回應選項，每個都應該是完整的句子，格式為字串陣列。以已建立的病患角色身份自然回應，避免自我介紹。【格式要求】必須是有效的字串陣列格式，例如：[\"回應1\", \"回應2\", \"回應3\", \"回應4\", \"回應5\"]")
     state = dspy.OutputField(desc="對話狀態：必須是 NORMAL、CONFUSED、TRANSITIONING 或 TERMINATED 其中之一。只有在真正無法理解時才使用 CONFUSED")
     dialogue_context = dspy.OutputField(desc="當前對話情境描述，如：醫師查房、病房日常、生命徵象相關、身體評估等。保持具體的醫療情境描述")
     state_reasoning = dspy.OutputField(desc="狀態判斷的理由說明，解釋為什麼選擇此狀態")
@@ -67,7 +89,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         # 初始化父類，DSPyDialogueModule 只接受 config 參數
         super().__init__(config)
         
-        # 替換為統一的對話處理器
+        # 替換為統一的對話處理器（使用預設 JSONAdapter 流程）
         self.unified_response_generator = dspy.ChainOfThought(UnifiedPatientResponseSignature)
         
         # 統計信息
@@ -115,7 +137,13 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             
             # DSPy 內部狀態追蹤
             logger.info(f"🧠 DSPY INTERNAL STATE PRE-CALL:")
-            logger.info(f"  🎯 Model Info: {type(self.unified_response_generator.lm).__name__}")
+            try:
+                if hasattr(dspy.settings, 'lm') and dspy.settings.lm:
+                    logger.info(f"  🎯 Model Info: {type(dspy.settings.lm).__name__}")
+                else:
+                    logger.info("  🎯 Model Info: DSPy LM not configured")
+            except Exception as e:
+                logger.info(f"  🎯 Model Info: Unable to access ({str(e)})")
             logger.info(f"  📊 Success Rate: {self.stats.get('successful_calls', 0)}/{self.stats.get('total_calls', 0)} = {self.stats.get('successful_calls', 0)/(self.stats.get('total_calls', 0) or 1):.2%}")
             logger.info(f"  🔄 Previous Failures: {self.stats.get('failed_calls', 0)}")
             logger.info(f"  📈 Unified Calls Count: {self.unified_stats['total_unified_calls']}")
@@ -267,6 +295,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 state=unified_prediction.state,
                 dialogue_context=unified_prediction.dialogue_context,
                 confidence=getattr(unified_prediction, 'confidence', 1.0),
+                reasoning=getattr(unified_prediction, 'reasoning', ''),
                 context_classification=unified_prediction.context_classification,
                 examples_used=0,  # 統一模式下暫不使用範例
                 processing_info={
@@ -297,28 +326,84 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             logger.error(f"  character_name: {character_name}")
             import traceback
             logger.error(f"Full traceback:\n{traceback.format_exc()}")
+            logger.error(f"=== DETAILED DSPy FAILURE DIAGNOSIS ===")
+            logger.error(f"DSPy Settings LM: {getattr(dspy.settings, 'lm', 'NOT_SET')}")
+            logger.error(f"DSPy Settings LM Type: {type(getattr(dspy.settings, 'lm', None))}")
+            logger.error(f"ChainOfThought Object: {type(self.unified_response_generator)}")
+            logger.error(f"Available ChainOfThought Attributes: {dir(self.unified_response_generator)}")
             logger.error(f"=== END UNIFIED DSPy FAILURE ===")
             
             # 返回錯誤回應
             return self._create_error_response(user_input, str(e))
     
-    def _parse_responses(self, responses_text: str) -> List[str]:
-        """解析回應文本為列表"""
+    def _parse_responses(self, responses_text: Union[str, List[Any]]) -> List[str]:
+        """解析回應為列表（僅用於日誌顯示）"""
         try:
+            # 已是列表
+            if isinstance(responses_text, list):
+                # 處理 list 內只有一個元素且該元素是 JSON 陣列字串的情況
+                if len(responses_text) == 1 and isinstance(responses_text[0], str):
+                    inner = responses_text[0].strip()
+                    if (inner.startswith('[') and inner.endswith(']')) or (inner.startswith('\u005b') and inner.endswith('\u005d')):
+                        try:
+                            parsed_inner = json.loads(inner)
+                            if isinstance(parsed_inner, list):
+                                return [str(x) for x in parsed_inner[:5]]
+                        except Exception:
+                            pass
+                # 常規列表
+                return [str(x) for x in responses_text[:5]]
+            
+            # 原始是字串 -> 嘗試 JSON 解析
             if isinstance(responses_text, str):
-                # 嘗試解析 JSON
                 try:
                     parsed = json.loads(responses_text)
                     if isinstance(parsed, list):
-                        return parsed[:5]  # 最多5個回應
+                        return [str(x) for x in parsed[:5]]
                 except json.JSONDecodeError:
                     # 不是 JSON，按行分割
                     lines = [line.strip() for line in responses_text.split('\n') if line.strip()]
                     return lines[:5]
+            
             return [str(responses_text)]
         except Exception as e:
             logger.warning(f"回應解析失敗: {e}")
             return ["回應格式解析失敗"]
+
+    # 覆蓋父類回應處理，處理特殊嵌套情況
+    def _process_responses(self, responses: Union[str, List[Any]]) -> List[str]:
+        try:
+            # 已是列表
+            if isinstance(responses, list):
+                # 若為 ["[\"a\", \"b\"]"] 形式，嘗試解析內層字串為陣列
+                if len(responses) == 1 and isinstance(responses[0], str):
+                    inner = responses[0].strip()
+                    if inner.startswith('[') and inner.endswith(']'):
+                        try:
+                            parsed_inner = json.loads(inner)
+                            if isinstance(parsed_inner, list):
+                                return [str(x) for x in parsed_inner[:5]]
+                        except Exception:
+                            pass
+                # 若為 [[...]] 形式，展平為單層
+                if len(responses) == 1 and isinstance(responses[0], list):
+                    return [str(x) for x in responses[0][:5]]
+                return [str(x) for x in responses[:5]]
+            
+            # 原始是字串 -> 嘗試 JSON 解析
+            if isinstance(responses, str):
+                try:
+                    parsed = json.loads(responses)
+                    if isinstance(parsed, list):
+                        return [str(x) for x in parsed[:5]]
+                except json.JSONDecodeError:
+                    lines = [line.strip() for line in responses.split('\n') if line.strip()]
+                    return lines[:5]
+            
+            return [str(responses)]
+        except Exception as e:
+            logger.error(f"回應格式處理失敗: {e}")
+            return ["抱歉，我現在有些困惑", "能否重新說一遍？", "讓我想想..."]
     
     def _detect_dialogue_degradation(self, prediction, responses: List[str]) -> bool:
         """檢測對話是否出現退化症狀
@@ -416,11 +501,11 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         if should_reset_context:
             # 重置為基本角色設定，保留關鍵醫療信息
             formatted = self._create_reset_context(character_name, character_persona)
-            character_reminder = f"\n[重新開始: 您是 {character_name}，{character_persona}。以病患身份自然回應。]"
+            character_reminder = f"\n[重新開始: 您是 {character_name}，{character_persona}。以病患身份自然回應。【邏輯一致性檢查】請注意維持醫療事實的一致性，包括症狀、發燒狀況、疼痛程度等。]"
             logger.info(f"🔄 Context reset triggered to prevent degradation")
         else:
-            # 正常的角色一致性提示
-            character_reminder = f"\n[重要: 您是 {character_name}，{character_persona}。保持角色一致性。]"
+            # 正常的角色一致性提示 + 邏輯一致性檢查
+            character_reminder = f"\n[重要: 您是 {character_name}，{character_persona}。保持角色一致性。【邏輯一致性檢查】請仔細檢查上述對話歷史中的醫療事實（症狀、發燒狀況、疼痛程度、服藥情況等），確保您的回應與之前提到的所有事實保持完全一致，避免任何矛盾。]"
         
         logger.info(f"🔧 Enhanced history management:")
         logger.info(f"  Original history length: {len(conversation_history)}")
