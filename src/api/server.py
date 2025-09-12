@@ -722,6 +722,45 @@ async def reset_performance_stats():
         logger.error(f"重置統計數據失敗: {e}")
         raise HTTPException(status_code=500, detail=f"重置失敗: {str(e)}")
 
+# Characters endpoint
+@app.get("/api/characters")
+async def get_characters():
+    """獲取可用角色列表"""
+    try:
+        characters_file = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'characters.yaml')
+        
+        with open(characters_file, 'r', encoding='utf-8') as file:
+            data = yaml.safe_load(file)
+            characters = data.get('characters', {})
+            
+        return {
+            "status": "success",
+            "characters": {
+                char_id: {
+                    "name": char_data.get("name", f"Character {char_id}"),
+                    "persona": char_data.get("persona", ""),
+                    "backstory": char_data.get("backstory", "")[:100] + "..." if len(char_data.get("backstory", "")) > 100 else char_data.get("backstory", "")
+                }
+                for char_id, char_data in characters.items()
+            }
+        }
+        
+    except FileNotFoundError:
+        logger.error("characters.yaml 文件未找到")
+        return {
+            "status": "success", 
+            "characters": {
+                "1": {
+                    "name": "Patient 1",
+                    "persona": "一般病患",
+                    "backstory": "系統默認角色"
+                }
+            }
+        }
+    except Exception as e:
+        logger.error(f"獲取角色列表失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"角色列表獲取失敗: {str(e)}")
+
 # Phase 5: 健康監控和回退端點
 @app.get("/api/health/status")
 async def get_health_status():
@@ -1065,6 +1104,22 @@ async def process_audio_dialogue(
     # 記錄到對話歷史，添加標記以便識別
     dialogue_manager.conversation_history.append("[系統]: 請從語音識別選項中選擇")
     
+    # 獲取實現版本信息
+    implementation_version = "original"
+    if session and "implementation_version" in session:
+        implementation_version = session["implementation_version"]
+    
+    # 創建基本的性能指標（音頻識別過程中的指標）
+    audio_metrics = None
+    if session and session.get("last_performance_metrics"):
+        last_metrics = session["last_performance_metrics"]
+        audio_metrics = {
+            "response_time": round(last_metrics.duration, 3) if hasattr(last_metrics, 'duration') else 0,
+            "timestamp": last_metrics.timestamp.isoformat() if hasattr(last_metrics, 'timestamp') else datetime.now().isoformat(),
+            "success": True,
+            "audio_processing": True
+        }
+    
     # 創建回應
     response = DialogueResponse(
         status="success",
@@ -1073,7 +1128,9 @@ async def process_audio_dialogue(
         dialogue_context="語音選項選擇",
         session_id=session_id,
         speech_recognition_options=options_list,
-        original_transcription=original_text or None
+        original_transcription=original_text or None,
+        implementation_version=implementation_version,
+        performance_metrics=audio_metrics
     )
     
     # 保存語音識別選項到交互日誌

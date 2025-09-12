@@ -63,25 +63,23 @@ class PerformanceMonitor:
         self.request_history: deque = deque(maxlen=max_history)
         self.lock = threading.Lock()
         
-        # 實時統計計數器
-        self.stats = {
-            "dspy": {
-                "total_requests": 0,
-                "successful_requests": 0,
-                "failed_requests": 0,
-                "total_duration": 0.0,
-                "recent_errors": deque(maxlen=100)  # 最近的錯誤記錄
-            },
-            "original": {
+        # 使用 defaultdict 動態創建統計 - 支援任何實現類型包括 'optimized'
+        def create_default_stats():
+            return {
                 "total_requests": 0,
                 "successful_requests": 0,
                 "failed_requests": 0,
                 "total_duration": 0.0,
                 "recent_errors": deque(maxlen=100)
             }
-        }
         
-        logger.info(f"性能監控器初始化，最大歷史記錄數: {max_history}")
+        self.stats = defaultdict(create_default_stats)
+        
+        # 預先初始化已知的實現類型
+        for impl in ["dspy", "original", "optimized"]:
+            _ = self.stats[impl]  # 觸發默認值創建
+        
+        logger.info(f"性能監控器初始化，支援動態實現類型，最大歷史記錄數: {max_history}")
     
     def start_request(self, implementation: str, endpoint: str, 
                      character_id: str = "", session_id: str = "") -> Dict[str, Any]:
