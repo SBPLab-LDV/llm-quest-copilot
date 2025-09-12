@@ -13,12 +13,25 @@ from typing import List, Dict, Any, Optional, Union
 from .gemini_client import GeminiClient
 from ..core.dspy.config import get_config
 
+# DSPy 回應對象，確保與 DSPy 適配器兼容
+class DSPyResponse:
+    """DSPy 兼容的回應對象"""
+    def __init__(self, text: str):
+        self.text = text
+    
+    def __str__(self):
+        return self.text
+    
+    def __repr__(self):
+        return f"DSPyResponse(text='{self.text[:50]}...')"
+
 logger = logging.getLogger(__name__)
 
 class DSPyGeminiLM(dspy.LM):
     """DSPy Gemini Language Model 適配器
     
     繼承 dspy.LM 並實現必要的方法，將 DSPy 的調用轉換為 Gemini API 調用。
+    確保完全兼容 DSPy 的響應處理機制。
     """
     
     def __init__(self, 
@@ -58,6 +71,76 @@ class DSPyGeminiLM(dspy.LM):
         
         logger.info(f"DSPy Gemini 適配器初始化完成：模型={model}, 溫度={temperature}")
     
+    def forward(self, prompt=None, messages=None, **kwargs):
+        """DSPy LM 的核心 forward 方法 - 必須正確實現
+        
+        這是 DSPy 內部適配器調用的關鍵方法。我們必須返回
+        DSPy 期望的回應格式。
+        
+        Args:
+            prompt: 字符串提示
+            messages: 消息列表（ChatML 格式）
+            **kwargs: 其他參數
+            
+        Returns:
+            DSPy 期望的回應格式
+        """
+        logger.info(f"🔄 DSPy forward() 調用")
+        logger.info(f"  - prompt: {prompt[:100] if prompt else None}...")
+        logger.info(f"  - messages: {messages}")
+        logger.info(f"  - kwargs: {list(kwargs.keys())}")
+        
+        try:
+            # 處理輸入格式
+            if prompt is not None:
+                input_text = prompt
+            elif messages is not None:
+                # 將 ChatML 消息轉換為單個提示
+                input_text = self._convert_messages_to_prompt(messages)
+            else:
+                raise ValueError("必須提供 prompt 或 messages")
+            
+            logger.info(f"  - 處理後輸入: {input_text[:200]}...")
+            
+            # 調用我們的 Gemini 客戶端
+            response_text = self._call_gemini(input_text, **kwargs)
+            
+            logger.info(f"🔄 DSPy forward() Gemini 回應長度: {len(response_text)}")
+            logger.info(f"🔄 DSPy forward() Gemini 回應內容: {response_text[:200]}...")
+            
+            # 返回 DSPy 期望的回應格式
+            # DSPy 期望一個字符串或具有 .choices 屬性的對象
+            return response_text
+            
+        except Exception as e:
+            logger.error(f"❌ DSPy forward() 失敗: {e}")
+            import traceback
+            logger.error(f"完整錯誤: {traceback.format_exc()}")
+            raise
+    
+    def generate(self, prompt: str, **kwargs) -> str:
+        """DSPy 期望的生成方法 - 確保兼容性
+        
+        Args:
+            prompt: 輸入提示
+            **kwargs: 其他參數
+            
+        Returns:
+            模型回應字符串
+        """
+        logger.info(f"🔄 DSPy generate() 調用，prompt 長度: {len(prompt)}")
+        logger.info(f"🔄 DSPy generate() prompt 內容: {prompt[:200]}...")
+        response = self._call_gemini(prompt, **kwargs)
+        logger.info(f"🔄 DSPy generate() 返回，response 長度: {len(response)}")
+        logger.info(f"🔄 DSPy generate() 返回內容: {response[:200]}...")
+        
+        # 確保返回的是純字符串
+        if not isinstance(response, str):
+            logger.warning(f"⚠️ generate() 返回的不是字符串類型: {type(response)}")
+            response = str(response)
+        
+        return response
+    
     def basic_request(self, prompt: str, **kwargs) -> str:
         """基本請求方法 - DSPy 必需
         
@@ -73,6 +156,11 @@ class DSPyGeminiLM(dspy.LM):
     def __call__(self, prompt: Union[str, List[str]] = None, **kwargs) -> Union[str, List[str]]:
         """主要調用方法 - DSPy 的標準接口
         
+        CRITICAL: 這個方法被 DSPy 適配器直接調用！
+        
+        重要：我們不調用 super().__call__()，而是直接實現完整的調用流程，
+        避免 DSPy 基類的複雜邏輯導致回應截斷。
+        
         Args:
             prompt: 輸入提示，可以是字符串或字符串列表
             **kwargs: 其他參數
@@ -81,6 +169,11 @@ class DSPyGeminiLM(dspy.LM):
             回應，可以是字符串或字符串列表
         """
         start_time = time.time()
+        
+        logger.critical(f"🚨 DSPyGeminiLM.__call__ 被調用!")
+        logger.critical(f"  - prompt type: {type(prompt)}")
+        logger.critical(f"  - prompt: {prompt[:100] if isinstance(prompt, str) else prompt}...")
+        logger.critical(f"  - kwargs keys: {list(kwargs.keys())}")
         
         try:
             # 檢查是否缺少 prompt
@@ -116,7 +209,22 @@ class DSPyGeminiLM(dspy.LM):
                 logger.debug(f"處理單個提示: {prompt[:100]}...")
                 response = self._call_gemini(prompt, **kwargs)
                 self._update_stats(start_time, success=True)
-                return response
+                
+                # ===== DSPy 接口修復 =====
+                # 確保返回的響應格式符合 DSPy 預期
+                logger.info(f"🔧 DSPy 接口修復 - 返回響應長度: {len(response)} 字符")
+                logger.info(f"🔧 DSPy 接口修復 - 返回響應內容: {response}")
+                
+                # 最終類型檢查
+                if not isinstance(response, str):
+                    logger.error(f"❌ __call__ 返回非字符串類型: {type(response)}")
+                    response = str(response)
+                
+                # 返回列表[str]，符合 DSPy adapters 對批量/單一回應的期望，避免被當作字元序列處理
+                logger.critical(f"🔧 Adapter 兼容性修復 - 返回列表[str] 以避免截斷")
+                logger.critical(f"  - 回應長度: {len(response)} 字符")
+                logger.critical(f"  - 回應前100字符: {response[:100]}...")
+                return [response]
             
             # 處理多個提示
             elif isinstance(prompt, list):
@@ -199,18 +307,195 @@ class DSPyGeminiLM(dspy.LM):
             logger.info(f"Full response content:\n{response}")
             logger.info(f"=== END GEMINI RESPONSE OUTPUT ===")
             
-            # 記錄成功
-            logger.debug(f"Gemini 回應長度: {len(response)} 字符")
+            # 清理 markdown 代碼塊格式 (為了DSPy JSON適配器)
+            cleaned_response = self._clean_markdown_json(response)
             
-            return response
+            if cleaned_response != response:
+                logger.info(f"🧹 清理 markdown 格式: {len(response)} -> {len(cleaned_response)} 字符")
+                logger.info(f"清理後完整內容: {cleaned_response}")
+                logger.debug(f"清理後內容: {cleaned_response[:200]}...")
+            
+            # 正規化 JSON：確保所有必填鍵存在，避免 JSONAdapter 解析失敗
+            normalized_response = self._normalize_json_response(cleaned_response)
+            
+            logger.debug(f"Gemini 回應長度: {len(normalized_response)} 字符")
+            return normalized_response
             
         except Exception as e:
             self.error_count += 1
             logger.error(f"Gemini API 調用失敗 (第 {self.call_count} 次): {e}")
             
-            # 返回錯誤回應（保持與原系統一致）
-            error_response = '{"responses": ["抱歉，我現在無法正確回應"],"state": "CONFUSED","dialogue_context": "系統錯誤"}'
-            return error_response
+            # 返回完整鍵集合的錯誤回應，避免 JSONAdapter 解析失敗
+            fallback = {
+                "reasoning": "系統錯誤，使用安全回退。",
+                "character_consistency_check": "NO",
+                "context_classification": "unknown",
+                "confidence": "0.00",
+                "responses": ["抱歉，我現在無法正確回應"],
+                "state": "CONFUSED",
+                "dialogue_context": "系統錯誤",
+                "state_reasoning": "LLM 調用異常，啟用回退。"
+            }
+            return json.dumps(fallback, ensure_ascii=False)
+    
+    def _clean_markdown_json(self, response: str) -> str:
+        """清理 Gemini 回應中的 markdown 代碼塊格式
+        
+        DSPy JSON 適配器期望純 JSON，但 Gemini 經常返回 markdown 格式的 JSON
+        
+        Args:
+            response: Gemini 的原始回應
+            
+        Returns:
+            清理後的回應
+        """
+        import re
+        
+        # 移除 markdown 代碼塊標記
+        # 匹配 ```json ... ``` 或 ``` ... ```
+        cleaned = re.sub(r'^```(?:json)?\s*\n', '', response.strip(), flags=re.MULTILINE)
+        cleaned = re.sub(r'\n```\s*$', '', cleaned.strip(), flags=re.MULTILINE)
+        
+        # 移除前後的空白
+        cleaned = cleaned.strip()
+        
+        # 如果結果是有效的 JSON 格式，返回清理後的版本
+        try:
+            import json
+            json.loads(cleaned)  # 測試是否為有效 JSON
+            return cleaned
+        except json.JSONDecodeError:
+            # 如果清理後不是有效 JSON，返回原始回應
+            logger.warning(f"清理後的回應不是有效 JSON，返回原始回應")
+            return response
+
+    def _normalize_json_response(self, text: str) -> str:
+        """嘗試將回應正規化為包含所有必填鍵的 JSON。
+        - 僅在回應看起來像 JSON 物件時動作；否則原樣返回。
+        - 確保缺失鍵以安全預設補齊，避免 JSONAdapter 解析中斷。
+        """
+        try:
+            s = text.strip()
+            if not (s.startswith('{') and s.endswith('}')):
+                return text
+
+            obj = json.loads(s)
+            if not isinstance(obj, dict):
+                return text
+
+            required = [
+                "reasoning",
+                "character_consistency_check",
+                "context_classification",
+                "confidence",
+                "responses",
+                "state",
+                "dialogue_context",
+                "state_reasoning"
+            ]
+
+            # 補齊缺失鍵
+            defaults = {
+                "reasoning": "",
+                "character_consistency_check": "YES",
+                "context_classification": "daily_routine_examples",
+                "confidence": "0.90",
+                "responses": ["我明白了，請繼續。"],
+                "state": "NORMAL",
+                "dialogue_context": "對話進行中",
+                "state_reasoning": "自動補齊缺失鍵以維持格式完整"
+            }
+
+            for k in required:
+                if k not in obj or obj[k] in (None, ""):
+                    obj[k] = defaults[k]
+
+            # 規範 responses 類型
+            if isinstance(obj.get("responses"), str):
+                try:
+                    maybe_list = json.loads(obj["responses"])  # 字串形式的 JSON 陣列
+                    if isinstance(maybe_list, list):
+                        obj["responses"] = [str(x) for x in maybe_list[:5]]
+                    else:
+                        obj["responses"] = [obj["responses"]]
+                except Exception:
+                    obj["responses"] = [obj["responses"]]
+            elif isinstance(obj.get("responses"), list):
+                obj["responses"] = [str(x) for x in obj["responses"][:5]]
+            else:
+                obj["responses"] = [str(obj["responses"])]
+
+            # 規範 confidence 為帶兩位小數的字串
+            conf = obj.get("confidence", "0.90")
+            try:
+                conf_f = float(conf)
+            except Exception:
+                conf_f = 0.90
+            obj["confidence"] = f"{conf_f:.2f}"
+
+            # 約束 state
+            valid_states = {"NORMAL", "CONFUSED", "TRANSITIONING", "TERMINATED"}
+            if str(obj.get("state", "")).upper() not in valid_states:
+                obj["state"] = "NORMAL"
+
+            return json.dumps(obj, ensure_ascii=False)
+        except Exception:
+            return text
+    
+    def _process_lm_response(self, response, prompt=None, messages=None, **kwargs):
+        """處理 LM 回應 - DSPy 基類調用的關鍵方法
+        
+        這個方法被 DSPy 基類在 __call__ 中調用來處理 LM 的原始回應。
+        如果沒有正確實現，會導致回應被截斷。
+        
+        Args:
+            response: 我們 forward() 方法返回的原始回應
+            prompt: 原始 prompt
+            messages: 原始 messages
+            **kwargs: 其他參數
+            
+        Returns:
+            處理後的回應，供 DSPy 適配器使用
+        """
+        logger.critical(f"🔧 _process_lm_response 被調用!")
+        logger.critical(f"  - response type: {type(response)}")
+        logger.critical(f"  - response length: {len(str(response))}")
+        logger.critical(f"  - response content: {str(response)[:200]}...")
+        
+        try:
+            # 如果回應是字符串，直接返回
+            if isinstance(response, str):
+                logger.info(f"✅ _process_lm_response 返回字符串回應")
+                return response
+                
+            # 如果回應是列表，處理第一個元素
+            elif isinstance(response, list) and len(response) > 0:
+                first_response = str(response[0])
+                logger.info(f"✅ _process_lm_response 從列表返回第一個元素")
+                return first_response
+                
+            # 如果回應有 choices 屬性（LiteLLM 格式）
+            elif hasattr(response, 'choices') and len(response.choices) > 0:
+                content = response.choices[0].message.content
+                logger.info(f"✅ _process_lm_response 從 LiteLLM 格式提取內容")
+                return content
+                
+            # 如果回應有 text 屬性
+            elif hasattr(response, 'text'):
+                text_content = response.text
+                logger.info(f"✅ _process_lm_response 從 text 屬性提取內容")
+                return text_content
+                
+            # 其他情況，轉換為字符串
+            else:
+                str_response = str(response)
+                logger.warning(f"⚠️ _process_lm_response 未知格式，轉換為字符串: {type(response)}")
+                return str_response
+                
+        except Exception as e:
+            logger.error(f"❌ _process_lm_response 處理失敗: {e}")
+            # 緊急情況下返回原始回應的字符串版本
+            return str(response) if response is not None else ""
     
     def _update_stats(self, start_time: float, success: bool, batch_size: int = 1):
         """更新統計信息
