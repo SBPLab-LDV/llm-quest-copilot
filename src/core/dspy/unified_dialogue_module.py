@@ -109,20 +109,42 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             # 獲取可用情境（本地處理，不調用 API）
             available_contexts = self._get_available_contexts()
             
-            # ====== 詳細調試日誌 - 追蹤對話退化問題 ======
-            logger.info(f"=== UNIFIED DSPy CALL #{self.unified_stats['total_unified_calls'] + 1} (節省 2次 API 調用) ===")
+            # ====== Phase 1.1: DSPy 內部狀態追蹤 - 調用前狀態 ======
+            current_call = self.unified_stats['total_unified_calls'] + 1
+            logger.info(f"=== UNIFIED DSPy CALL #{current_call} - PRE-CALL STATE ANALYSIS ===")
+            
+            # DSPy 內部狀態追蹤
+            logger.info(f"🧠 DSPY INTERNAL STATE PRE-CALL:")
+            logger.info(f"  🎯 Model Info: {type(self.unified_response_generator.lm).__name__}")
+            logger.info(f"  📊 Success Rate: {self.stats.get('successful_calls', 0)}/{self.stats.get('total_calls', 0)} = {self.stats.get('successful_calls', 0)/(self.stats.get('total_calls', 0) or 1):.2%}")
+            logger.info(f"  🔄 Previous Failures: {self.stats.get('failed_calls', 0)}")
+            logger.info(f"  📈 Unified Calls Count: {self.unified_stats['total_unified_calls']}")
+            
+            # Token 使用量估算
+            input_text_length = len(str(user_input)) + len(str(formatted_history)) + len(str(character_details))
+            estimated_tokens = input_text_length // 4  # 粗略估算
+            logger.info(f"  💭 Estimated Input Tokens: {estimated_tokens}")
+            logger.info(f"  📏 Input Text Length: {input_text_length} chars")
+            
+            # 對話複雜度分析
+            conversation_rounds = len(conversation_history) // 2  # 假設每輪包含護理人員+病患
+            logger.info(f"  🔢 Conversation Rounds: {conversation_rounds}")
+            logger.info(f"  🎪 Signature Complexity: 8 inputs, 7 outputs")
+            
             logger.info(f"🔍 DIALOGUE DEGRADATION DEBUG:")
             logger.info(f"  📥 Input: {user_input}")
             logger.info(f"  👤 Character: {character_name} ({character_persona})")
             logger.info(f"  📚 Full conversation history ({len(conversation_history)} total):")
             for i, hist_item in enumerate(conversation_history, 1):
                 logger.info(f"    [{i:2}] {hist_item}")
-            logger.info(f"  📝 Formatted history (last 5): {formatted_history}")
+            logger.info(f"  📝 Formatted history: {formatted_history}")
             logger.info(f"  🎯 Available contexts: {available_contexts}")
-            logger.info(f"  📊 Stats - Total calls: {self.stats.get('total_calls', 0)}, Success: {self.stats.get('successful_calls', 0)}")
             logger.info(f"=== 開始單次調用處理：情境分類 + 回應生成 + 狀態判斷 ===")
             
             # **關鍵優化：單一 API 調用完成所有處理**
+            import time
+            call_start_time = time.time()
+            
             unified_prediction = self.unified_response_generator(
                 user_input=user_input,
                 character_name=character_name,
@@ -134,16 +156,79 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 available_contexts=available_contexts
             )
             
+            call_end_time = time.time()
+            call_duration = call_end_time - call_start_time
+            
+            # ====== Phase 1.1: DSPy 內部狀態追蹤 - 調用後狀態 ======
+            logger.info(f"=== DSPy INTERNAL STATE POST-CALL - Call #{current_call} ===")
+            logger.info(f"🚀 LLM Call Performance:")
+            logger.info(f"  ⏱️ Call Duration: {call_duration:.3f}s")
+            logger.info(f"  🎯 Call Success: {hasattr(unified_prediction, 'responses')}")
+            logger.info(f"  📊 Prediction Type: {type(unified_prediction).__name__}")
+            
+            # 檢查 DSPy 預測品質
+            prediction_quality = self._assess_prediction_quality(unified_prediction)
+            logger.info(f"  🏆 Prediction Quality Score: {prediction_quality:.3f}")
+            
+            # 檢查是否有 DSPy trace 資訊
+            if hasattr(unified_prediction, '_trace'):
+                logger.info(f"  🔍 DSPy Trace Available: True, {len(unified_prediction._trace)} steps")
+            else:
+                logger.info(f"  🔍 DSPy Trace Available: False")
+            
+            # 模型狀態變化檢查
+            logger.info(f"  🧠 Model State Changed: {self._check_model_state_change()}")
+            
+            # 記憶使用量估算（如果可用）
+            try:
+                import psutil
+                memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
+                logger.info(f"  💾 Memory Usage: {memory_mb:.1f} MB")
+            except ImportError:
+                logger.info(f"  💾 Memory Usage: N/A (psutil not available)")
+            
+            # ====== Phase 1.2: LLM 推理過程深度追蹤 ======
+            logger.info(f"=== LLM REASONING DEEP TRACE - Call #{current_call} ===")
+            
+            # 推理過程詳細分析
+            reasoning_analysis = self._analyze_reasoning_process(unified_prediction, conversation_rounds, current_call)
+            logger.info(f"🧠 REASONING QUALITY ANALYSIS:")
+            logger.info(f"  📏 Reasoning Length: {reasoning_analysis['reasoning_length']} chars")
+            logger.info(f"  🎯 Reasoning Completeness: {reasoning_analysis['completeness']:.2f}")
+            logger.info(f"  💭 Character Awareness: {reasoning_analysis['character_awareness']:.2f}")
+            logger.info(f"  🏥 Medical Context Understanding: {reasoning_analysis['medical_context']:.2f}")
+            logger.info(f"  🔍 Logic Coherence: {reasoning_analysis['logic_coherence']:.2f}")
+            
+            # DSPy Chain of Thought 步驟追蹤
+            if hasattr(unified_prediction, '_trace') and unified_prediction._trace:
+                logger.info(f"🔗 CHAIN OF THOUGHT TRACE:")
+                for i, step in enumerate(unified_prediction._trace[:3]):  # 只顯示前3步
+                    logger.info(f"  Step {i+1}: {str(step)[:100]}...")
+            else:
+                logger.info(f"🔗 CHAIN OF THOUGHT TRACE: Not available")
+            
             # ====== 詳細推理結果日誌 - 診斷退化原因 ======
             logger.info(f"=== UNIFIED DSPy RESULT - DEGRADATION ANALYSIS ===")
             logger.info(f"🧠 DSPy REASONING OUTPUT:")
-            logger.info(f"  💭 reasoning: {getattr(unified_prediction, 'reasoning', 'NOT_PROVIDED')}")
+            
+            # 完整推理內容記錄
+            full_reasoning = getattr(unified_prediction, 'reasoning', 'NOT_PROVIDED')
+            if len(full_reasoning) > 200:
+                logger.info(f"  💭 reasoning (first 200 chars): {full_reasoning[:200]}...")
+                logger.info(f"  💭 reasoning (full): {full_reasoning}")
+            else:
+                logger.info(f"  💭 reasoning: {full_reasoning}")
+            
             logger.info(f"  ✅ character_consistency_check: {getattr(unified_prediction, 'character_consistency_check', 'NOT_PROVIDED')}")
             logger.info(f"  🎯 context_classification: {unified_prediction.context_classification}")
             logger.info(f"  🎪 confidence: {unified_prediction.confidence}")
             logger.info(f"  📊 state: {unified_prediction.state}")
             logger.info(f"  🌍 dialogue_context: {unified_prediction.dialogue_context}")
             logger.info(f"  🔍 state_reasoning: {getattr(unified_prediction, 'state_reasoning', 'NOT_PROVIDED')}")
+            
+            # 推理品質變化趨勢
+            quality_trend = self._track_reasoning_quality_trend(reasoning_analysis, current_call)
+            logger.info(f"  📈 Quality Trend: {quality_trend}")
             
             # 解析並顯示回應內容
             parsed_responses = self._parse_responses(unified_prediction.responses)
@@ -156,6 +241,14 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             logger.info(f"  ⚠️  DEGRADATION DETECTED: {is_degraded}")
             if is_degraded:
                 logger.warning(f"🚨 DIALOGUE DEGRADATION WARNING - Response quality has declined!")
+                logger.warning(f"🔍 Degradation Context: Round {conversation_rounds}, Call #{current_call}")
+                logger.warning(f"🎯 Quality Score: {reasoning_analysis.get('overall_quality', 0):.2f}")
+                
+            # 深度退化分析
+            degradation_analysis = self._deep_degradation_analysis(unified_prediction, parsed_responses, conversation_rounds)
+            logger.info(f"🔬 DEEP DEGRADATION ANALYSIS:")
+            for key, value in degradation_analysis.items():
+                logger.info(f"  {key}: {value}")
             
             logger.info(f"=== API 調用節省：2次 (原本需要 3次，現在只需 1次) ===")
             
@@ -371,6 +464,241 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
 目前狀況穩定，正在康復中"""
         
         return reset_context
+    
+    def _assess_prediction_quality(self, prediction) -> float:
+        """評估 DSPy 預測品質
+        
+        Args:
+            prediction: DSPy prediction 對象
+            
+        Returns:
+            float: 品質分數 (0.0-1.0)
+        """
+        try:
+            quality_score = 1.0
+            
+            # 檢查基本欄位存在性
+            required_fields = ['responses', 'state', 'context_classification', 'confidence']
+            for field in required_fields:
+                if not hasattr(prediction, field) or getattr(prediction, field) is None:
+                    quality_score -= 0.2
+            
+            # 檢查回應品質
+            if hasattr(prediction, 'responses'):
+                responses = self._parse_responses(prediction.responses)
+                if len(responses) == 0:
+                    quality_score -= 0.3
+                elif len(responses) < 5:
+                    quality_score -= 0.1
+                
+                # 檢查自我介紹模式
+                for response in responses:
+                    if any(pattern in response for pattern in ["我是Patient", "您好，我是"]):
+                        quality_score -= 0.4
+                        break
+            
+            # 檢查推理品質
+            if hasattr(prediction, 'reasoning') and prediction.reasoning:
+                if len(prediction.reasoning) < 50:  # 推理過程太簡短
+                    quality_score -= 0.1
+            else:
+                quality_score -= 0.2
+            
+            # 檢查角色一致性
+            if hasattr(prediction, 'character_consistency_check'):
+                if str(prediction.character_consistency_check).upper() == 'NO':
+                    quality_score -= 0.3
+            
+            return max(0.0, min(1.0, quality_score))
+            
+        except Exception as e:
+            logger.warning(f"品質評估失敗: {e}")
+            return 0.5  # 預設中等品質
+    
+    def _check_model_state_change(self) -> bool:
+        """檢查模型狀態是否有變化
+        
+        Returns:
+            bool: True if state changed
+        """
+        try:
+            # 簡單的狀態變化檢查
+            current_calls = self.stats.get('total_calls', 0)
+            if not hasattr(self, '_last_total_calls'):
+                self._last_total_calls = current_calls
+                return True
+            
+            changed = current_calls != self._last_total_calls
+            self._last_total_calls = current_calls
+            return changed
+            
+        except Exception:
+            return False
+    
+    def _analyze_reasoning_process(self, prediction, conversation_rounds: int, current_call: int) -> Dict[str, Any]:
+        """分析 LLM 推理過程品質
+        
+        Args:
+            prediction: DSPy prediction 對象
+            conversation_rounds: 對話輪次
+            current_call: 目前調用編號
+            
+        Returns:
+            Dict: 推理分析結果
+        """
+        try:
+            reasoning = getattr(prediction, 'reasoning', '')
+            if not reasoning:
+                return {
+                    'reasoning_length': 0,
+                    'completeness': 0.0,
+                    'character_awareness': 0.0,
+                    'medical_context': 0.0,
+                    'logic_coherence': 0.0,
+                    'overall_quality': 0.0
+                }
+            
+            analysis = {
+                'reasoning_length': len(reasoning),
+                'completeness': self._assess_reasoning_completeness(reasoning),
+                'character_awareness': self._assess_character_awareness(reasoning),
+                'medical_context': self._assess_medical_context(reasoning),
+                'logic_coherence': self._assess_logic_coherence(reasoning)
+            }
+            
+            # 計算整體品質分數
+            analysis['overall_quality'] = (
+                analysis['completeness'] * 0.3 +
+                analysis['character_awareness'] * 0.3 +
+                analysis['medical_context'] * 0.2 +
+                analysis['logic_coherence'] * 0.2
+            )
+            
+            return analysis
+            
+        except Exception as e:
+            logger.warning(f"推理分析失敗: {e}")
+            return {'error': str(e), 'overall_quality': 0.0}
+    
+    def _assess_reasoning_completeness(self, reasoning: str) -> float:
+        """評估推理完整性"""
+        completeness_indicators = [
+            "分析", "考慮", "情況", "狀態", "病患", "護理", "醫療", "回應"
+        ]
+        found_indicators = sum(1 for indicator in completeness_indicators if indicator in reasoning)
+        return min(1.0, found_indicators / len(completeness_indicators))
+    
+    def _assess_character_awareness(self, reasoning: str) -> float:
+        """評估角色意識"""
+        character_indicators = [
+            "病患", "角色", "人格", "個性", "背景", "口腔癌", "康復", "醫院"
+        ]
+        negative_indicators = [
+            "我是Patient", "自我介紹", "您好，我是"
+        ]
+        
+        positive_score = sum(1 for indicator in character_indicators if indicator in reasoning)
+        negative_score = sum(1 for indicator in negative_indicators if indicator in reasoning)
+        
+        score = positive_score / len(character_indicators) - negative_score * 0.5
+        return max(0.0, min(1.0, score))
+    
+    def _assess_medical_context(self, reasoning: str) -> float:
+        """評估醫療情境理解"""
+        medical_indicators = [
+            "症狀", "檢查", "治療", "診斷", "手術", "傷口", "恢復", "護理人員", "醫師"
+        ]
+        found_indicators = sum(1 for indicator in medical_indicators if indicator in reasoning)
+        return min(1.0, found_indicators / len(medical_indicators))
+    
+    def _assess_logic_coherence(self, reasoning: str) -> float:
+        """評估邏輯連貫性"""
+        try:
+            # 簡單的連貫性檢查
+            sentences = reasoning.split('。')
+            if len(sentences) < 2:
+                return 0.5
+            
+            # 檢查邏輯連接詞
+            logic_connectors = ["因為", "所以", "但是", "然而", "因此", "由於", "基於"]
+            connector_count = sum(1 for connector in logic_connectors if connector in reasoning)
+            
+            # 基於句子數量和邏輯連接詞評分
+            coherence_score = min(1.0, (len(sentences) * 0.1) + (connector_count * 0.2))
+            return coherence_score
+            
+        except:
+            return 0.5
+    
+    def _track_reasoning_quality_trend(self, reasoning_analysis: Dict, current_call: int) -> str:
+        """追蹤推理品質變化趨勢"""
+        try:
+            current_quality = reasoning_analysis.get('overall_quality', 0.0)
+            
+            # 儲存歷史品質分數
+            if not hasattr(self, '_quality_history'):
+                self._quality_history = []
+            
+            self._quality_history.append(current_quality)
+            
+            # 只保留最近5次的記錄
+            if len(self._quality_history) > 5:
+                self._quality_history = self._quality_history[-5:]
+            
+            if len(self._quality_history) < 2:
+                return "Insufficient data"
+            
+            # 分析趨勢
+            recent_avg = sum(self._quality_history[-2:]) / 2
+            early_avg = sum(self._quality_history[:-2]) / max(1, len(self._quality_history) - 2)
+            
+            if recent_avg > early_avg + 0.1:
+                return "Improving"
+            elif recent_avg < early_avg - 0.1:
+                return "Degrading"
+            else:
+                return "Stable"
+                
+        except Exception:
+            return "Error"
+    
+    def _deep_degradation_analysis(self, prediction, responses: List[str], conversation_rounds: int) -> Dict[str, Any]:
+        """深度退化分析"""
+        try:
+            analysis = {
+                "Round": conversation_rounds,
+                "Response_Count": len(responses),
+                "Has_Self_Introduction": any("我是Patient" in r for r in responses),
+                "Has_Generic_Responses": any("沒有完全理解" in r for r in responses),
+                "State": getattr(prediction, 'state', 'UNKNOWN'),
+                "Context_Classification": getattr(prediction, 'context_classification', 'UNKNOWN'),
+                "Confidence_Level": getattr(prediction, 'confidence', 0.0),
+                "Character_Consistency": getattr(prediction, 'character_consistency_check', 'UNKNOWN')
+            }
+            
+            # 退化嚴重程度評估
+            degradation_score = 0
+            if analysis["Has_Self_Introduction"]:
+                degradation_score += 3
+            if analysis["Has_Generic_Responses"]:
+                degradation_score += 2
+            if analysis["Response_Count"] < 3:
+                degradation_score += 2
+            if analysis["State"] == "CONFUSED":
+                degradation_score += 1
+            
+            analysis["Degradation_Severity"] = degradation_score
+            analysis["Severity_Level"] = (
+                "Critical" if degradation_score >= 5 else
+                "High" if degradation_score >= 3 else
+                "Medium" if degradation_score >= 1 else
+                "Low"
+            )
+            
+            return analysis
+            
+        except Exception as e:
+            return {"Error": str(e)}
     
     def get_unified_statistics(self) -> Dict[str, Any]:
         """獲取統一模組的統計資訊"""

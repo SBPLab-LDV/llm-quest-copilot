@@ -8,6 +8,7 @@
 
 import json
 import logging
+import time
 from typing import Optional, Union
 
 from ..dialogue import DialogueManager
@@ -129,6 +130,10 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             
             # 關鍵修復：檢查並修復退化回應
             response_data = self._apply_degradation_prevention(response_data, user_input)
+            
+            # ====== Phase 1.3: 會話狀態變化追蹤 ======
+            round_number = len(self.conversation_history) // 2 + 1  # 估算輪次
+            self._track_session_state_changes(user_input, response_data, round_number)
             
             # 更新對話狀態
             self._update_dialogue_state(response_data)
@@ -441,6 +446,279 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 
         except Exception as e:
             self.logger.error(f"上下文重置失敗: {e}")
+    
+    def _track_session_state_changes(self, user_input: str, response_data: dict, round_number: int):
+        """追蹤會話狀態變化和退化指標
+        
+        Args:
+            user_input: 用戶輸入
+            response_data: 回應資料
+            round_number: 對話輪次
+        """
+        try:
+            self.logger.info(f"=== SESSION STATE TRACKING - Round {round_number} ===")
+            
+            # 基本會話資訊
+            self.logger.info(f"🔢 CONVERSATION METRICS:")
+            self.logger.info(f"  📊 Round Number: {round_number}")
+            self.logger.info(f"  📈 Total Conversation History: {len(self.conversation_history)} entries")
+            self.logger.info(f"  📏 Current Input Length: {len(user_input)} chars")
+            
+            # 會話狀態分析
+            session_state = self._analyze_session_state(response_data, round_number)
+            self.logger.info(f"  🎭 Session State Analysis:")
+            for key, value in session_state.items():
+                self.logger.info(f"    {key}: {value}")
+            
+            # 角色一致性追蹤
+            consistency_score = self._calculate_consistency_score(response_data)
+            self.logger.info(f"  🎯 Character Consistency Score: {consistency_score:.3f}")
+            
+            # 回應品質指標
+            quality_metrics = self._calculate_response_quality_metrics(response_data)
+            self.logger.info(f"  🏆 Response Quality Metrics:")
+            for metric, value in quality_metrics.items():
+                self.logger.info(f"    {metric}: {value}")
+            
+            # 退化風險評估
+            degradation_risk = self._assess_degradation_risk(response_data, round_number)
+            self.logger.info(f"  ⚠️  Degradation Risk: {degradation_risk['risk_level']} ({degradation_risk['score']:.2f})")
+            
+            # 會話複雜度分析
+            complexity_analysis = self._analyze_conversation_complexity()
+            self.logger.info(f"  🧮 Conversation Complexity:")
+            for key, value in complexity_analysis.items():
+                self.logger.info(f"    {key}: {value}")
+            
+            # 記憶使用情況
+            memory_info = self._track_memory_usage()
+            self.logger.info(f"  💾 Memory Usage: {memory_info}")
+            
+            # 如果是關鍵輪次（3-5輪），額外記錄
+            if 3 <= round_number <= 5:
+                self.logger.warning(f"🚨 CRITICAL ROUND {round_number} - Enhanced monitoring active")
+                self._log_critical_round_analysis(user_input, response_data, round_number)
+            
+            # 儲存狀態歷史（用於趨勢分析）
+            self._store_session_state_history(session_state, round_number)
+            
+        except Exception as e:
+            self.logger.error(f"會話狀態追蹤失敗: {e}")
+    
+    def _analyze_session_state(self, response_data: dict, round_number: int) -> dict:
+        """分析當前會話狀態"""
+        try:
+            responses = response_data.get("responses", [])
+            state = response_data.get("state", "UNKNOWN")
+            context = response_data.get("dialogue_context", "UNKNOWN")
+            
+            return {
+                "Response_Count": len(responses),
+                "Dialogue_State": state,
+                "Dialogue_Context": context,
+                "Round_Number": round_number,
+                "Has_Recovery_Applied": response_data.get("recovery_applied", False),
+                "Original_Degradation": response_data.get("original_degradation", []),
+                "Emergency_Recovery": response_data.get("emergency_recovery", False)
+            }
+        except Exception as e:
+            return {"Error": str(e)}
+    
+    def _calculate_consistency_score(self, response_data: dict) -> float:
+        """計算角色一致性分數"""
+        try:
+            responses = response_data.get("responses", [])
+            if not responses:
+                return 0.0
+            
+            score = 1.0
+            
+            # 檢查自我介紹模式（嚴重扣分）
+            for response in responses:
+                if any(pattern in str(response) for pattern in ["我是Patient", "您好，我是"]):
+                    score -= 0.4
+                    break
+            
+            # 檢查通用回應（中度扣分）
+            for response in responses:
+                if any(pattern in str(response) for pattern in ["沒有完全理解", "換個方式說明", "您需要什麼幫助"]):
+                    score -= 0.2
+                    break
+            
+            # 檢查醫療相關性（加分）
+            medical_terms = ["症狀", "檢查", "傷口", "恢復", "治療", "藥物", "護理"]
+            has_medical_context = any(
+                any(term in str(response) for term in medical_terms)
+                for response in responses
+            )
+            if has_medical_context:
+                score += 0.1
+            
+            return max(0.0, min(1.0, score))
+            
+        except Exception:
+            return 0.5
+    
+    def _calculate_response_quality_metrics(self, response_data: dict) -> dict:
+        """計算回應品質指標"""
+        try:
+            responses = response_data.get("responses", [])
+            
+            metrics = {
+                "Response_Count": len(responses),
+                "Average_Length": sum(len(str(r)) for r in responses) // max(1, len(responses)),
+                "Has_Medical_Terms": self._has_medical_terms(responses),
+                "Has_Self_Introduction": self._has_self_introduction(response_data),
+                "Context_Relevance": self._calculate_context_relevance("", response_data),  # 簡化版
+                "Diversity_Score": self._calculate_response_diversity(responses)
+            }
+            
+            return metrics
+            
+        except Exception as e:
+            return {"Error": str(e)}
+    
+    def _has_medical_terms(self, responses: list) -> bool:
+        """檢查是否包含醫療術語"""
+        medical_terms = ["症狀", "檢查", "傷口", "恢復", "治療", "藥物", "護理", "醫師", "病房"]
+        return any(
+            any(term in str(response) for term in medical_terms)
+            for response in responses
+        )
+    
+    def _calculate_response_diversity(self, responses: list) -> float:
+        """計算回應多樣性分數"""
+        try:
+            if len(responses) <= 1:
+                return 0.0
+            
+            # 簡單的多樣性檢查：計算不同開頭的比例
+            first_chars = [str(r)[0] if str(r) else '' for r in responses]
+            unique_starts = len(set(first_chars))
+            
+            return unique_starts / len(responses)
+            
+        except Exception:
+            return 0.5
+    
+    def _assess_degradation_risk(self, response_data: dict, round_number: int) -> dict:
+        """評估退化風險"""
+        try:
+            risk_score = 0.0
+            risk_factors = []
+            
+            # 輪次風險（第4-5輪風險較高）
+            if 4 <= round_number <= 5:
+                risk_score += 0.3
+                risk_factors.append("Critical_Round")
+            
+            # 回應品質風險
+            responses = response_data.get("responses", [])
+            if len(responses) < 3:
+                risk_score += 0.2
+                risk_factors.append("Few_Responses")
+            
+            # 自我介紹風險
+            if self._has_self_introduction(response_data):
+                risk_score += 0.4
+                risk_factors.append("Self_Introduction")
+            
+            # 狀態風險
+            if response_data.get("state") == "CONFUSED":
+                risk_score += 0.1
+                risk_factors.append("Confused_State")
+            
+            # 已應用恢復的風險
+            if response_data.get("recovery_applied"):
+                risk_score += 0.2
+                risk_factors.append("Recovery_Applied")
+            
+            # 確定風險等級
+            if risk_score >= 0.7:
+                risk_level = "HIGH"
+            elif risk_score >= 0.4:
+                risk_level = "MEDIUM"
+            elif risk_score >= 0.2:
+                risk_level = "LOW"
+            else:
+                risk_level = "MINIMAL"
+            
+            return {
+                "score": risk_score,
+                "risk_level": risk_level,
+                "factors": risk_factors
+            }
+            
+        except Exception as e:
+            return {"score": 1.0, "risk_level": "ERROR", "factors": [str(e)]}
+    
+    def _analyze_conversation_complexity(self) -> dict:
+        """分析對話複雜度"""
+        try:
+            history_length = len(self.conversation_history)
+            total_chars = sum(len(entry) for entry in self.conversation_history)
+            
+            return {
+                "History_Entries": history_length,
+                "Total_Characters": total_chars,
+                "Average_Entry_Length": total_chars // max(1, history_length),
+                "Estimated_Rounds": history_length // 2,
+                "Complexity_Level": (
+                    "High" if total_chars > 2000 else
+                    "Medium" if total_chars > 1000 else
+                    "Low"
+                )
+            }
+        except Exception:
+            return {"Error": "Analysis failed"}
+    
+    def _track_memory_usage(self) -> str:
+        """追蹤記憶體使用情況"""
+        try:
+            import psutil
+            process = psutil.Process()
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            return f"{memory_mb:.1f} MB"
+        except ImportError:
+            return "N/A (psutil not available)"
+        except Exception:
+            return "Error"
+    
+    def _log_critical_round_analysis(self, user_input: str, response_data: dict, round_number: int):
+        """記錄關鍵輪次的詳細分析"""
+        self.logger.warning(f"🔍 CRITICAL ROUND {round_number} DETAILED ANALYSIS:")
+        self.logger.warning(f"  📥 Input: '{user_input}'")
+        self.logger.warning(f"  📊 Response State: {response_data.get('state', 'UNKNOWN')}")
+        self.logger.warning(f"  🌍 Context: {response_data.get('dialogue_context', 'UNKNOWN')}")
+        self.logger.warning(f"  💬 Response Count: {len(response_data.get('responses', []))}")
+        
+        # 詳細回應分析
+        responses = response_data.get('responses', [])
+        for i, response in enumerate(responses, 1):
+            has_issues = any(pattern in str(response) for pattern in ["我是Patient", "沒有完全理解", "您需要什麼幫助"])
+            status = "🔴 PROBLEMATIC" if has_issues else "✅ OK"
+            self.logger.warning(f"    Response {i}: {status} - '{str(response)[:100]}...'")
+    
+    def _store_session_state_history(self, session_state: dict, round_number: int):
+        """儲存會話狀態歷史"""
+        try:
+            if not hasattr(self, '_session_history'):
+                self._session_history = []
+            
+            history_entry = {
+                "round": round_number,
+                "timestamp": time.time(),
+                "state": session_state
+            }
+            
+            self._session_history.append(history_entry)
+            
+            # 只保留最近10輪的記錄
+            if len(self._session_history) > 10:
+                self._session_history = self._session_history[-10:]
+                
+        except Exception as e:
+            self.logger.error(f"狀態歷史儲存失敗: {e}")
     
     def _generate_emergency_response(self, user_input: str) -> str:
         """生成緊急恢復回應，當所有其他方法都失敗時使用"""
