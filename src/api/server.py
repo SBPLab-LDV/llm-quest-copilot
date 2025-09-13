@@ -118,6 +118,7 @@ class DialogueResponse(BaseModel):
     original_transcription: Optional[str] = None  # 新增: 原始語音轉錄文本
     implementation_version: Optional[str] = None  # Phase 5: 實現版本標記
     performance_metrics: Optional[Dict[str, Any]] = None  # Phase 5: 性能指標
+    processing_info: Optional[Dict[str, Any]] = None  # Unified/consistency摘要（可選）
 
 class SelectResponseRequest(BaseModel):
     """選擇回應請求模型"""
@@ -542,27 +543,73 @@ async def format_dialogue_response(
     if "dialogue_context" not in response_dict:
         logger.warning("回應中缺少 dialogue_context 鍵，使用默認值")
         response_dict["dialogue_context"] = "未知上下文"
+
+    # 規範化 responses：修正 "['a','b']" 等字串化列表為真正列表，或單字串/多行轉為列表
+    try:
+        res = response_dict.get("responses")
+        # 情況1：列表中只有一個元素，且該元素是字串形式的列表
+        if isinstance(res, list) and len(res) == 1 and isinstance(res[0], str):
+            s = res[0].strip()
+            if s.startswith('[') and s.endswith(']'):
+                parsed = None
+                try:
+                    parsed = json.loads(s)
+                except json.JSONDecodeError:
+                    import ast as _ast
+                    try:
+                        parsed = _ast.literal_eval(s)
+                    except Exception:
+                        parsed = None
+                if isinstance(parsed, list):
+                    response_dict["responses"] = [str(x) for x in parsed[:5]]
+        # 情況2：responses 本身是字串
+        elif isinstance(res, str):
+            s = res.strip()
+            if s.startswith('[') and s.endswith(']'):
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, list):
+                        response_dict["responses"] = [str(x) for x in parsed[:5]]
+                except json.JSONDecodeError:
+                    pass
+            else:
+                # 以換行分割成多行選項
+                lines = [line.strip() for line in s.split('\n') if line.strip()]
+                if lines:
+                    response_dict["responses"] = lines[:5]
+        # 最終保證為字串列表
+        if not isinstance(response_dict.get("responses"), list):
+            response_dict["responses"] = [str(response_dict.get("responses"))]
+        else:
+            response_dict["responses"] = [str(x) for x in response_dict["responses"]]
+    except Exception as _e:
+        logger.warning(f"規範化 responses 失敗: {_e}")
     
     # 處理 CONFUSED 狀態，提供更好的備用回應
     if response_dict["state"] == "CONFUSED" and session and "dialogue_manager" in session:
+        # 重要診斷標記：伺服器層回退被觸發
+        logger.warning("SERVER_FALLBACK_TRIGGERED: Replacing CONFUSED response with fallback template")
+        try:
+            logger.warning(f"SERVER_FALLBACK_ORIGINAL: {response_dict}")
+        except Exception:
+            pass
+
         character = session["dialogue_manager"].character
         logger.info(f"將 CONFUSED 回應替換為角色適當的回應")
         character_name = character.name
         character_persona = character.persona
         
-        # 為避免每次返回相同的備用回應，我們可以提供幾種不同的選項
-        fallback_responses = [
-            f"您好，我是{character_name}。{character_persona}。您需要什麼幫助嗎？",
-            f"抱歉，我理解您想了解更多關於我的情況。我是{character_name}，{character_persona}。",
-            f"您好，我是{character_name}。我可能沒有完全理解您的問題，能請您換個方式說明嗎？",
-            f"我是{character_name}，{character_persona}。抱歉，我現在可能沒法完全理解您的問題。"
+        # 中性、多樣化的備用回應（避免自我介紹與通用模板）
+        neutral_responses = [
+            "還可以，就是傷口有點緊繃。",
+            "這兩天比較累，休息還在調整中。",
+            "目前沒有發燒，偶爾會覺得有點疼。",
+            "吃東西有點不太方便，其他還好。",
+            "整體還行，謝謝關心。"
         ]
-        
-        # 使用時間戳作為簡單的輪換機制
-        import time
-        index = int(time.time()) % len(fallback_responses)
-        
-        response_dict["responses"] = [fallback_responses[index]]
+
+        # 直接提供多個選項，改善單一回應問題
+        response_dict["responses"] = neutral_responses
         response_dict["state"] = "NORMAL"  # 改為 NORMAL 狀態
         response_dict["dialogue_context"] = "一般問診對話"
         
@@ -604,7 +651,8 @@ async def format_dialogue_response(
             session_id=current_session_id or str(uuid.uuid4()),
             speech_recognition_options=response_dict.get("speech_recognition_options", None),
             implementation_version=implementation_version,  # Phase 5: 版本信息
-            performance_metrics=metrics_dict  # Phase 5: 性能指標
+            performance_metrics=metrics_dict,  # Phase 5: 性能指標
+            processing_info=response_dict.get("processing_info")
         )
         return response
     except Exception as e:
