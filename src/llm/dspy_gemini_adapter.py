@@ -27,6 +27,21 @@ class DSPyResponse:
 
 logger = logging.getLogger(__name__)
 
+# Ensure a dedicated debug log file exists for prompt/response inspection
+try:
+    _has_dspy_file_handler = any(
+        isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', '').endswith('dspy_internal_debug.log')
+        for h in logger.handlers
+    )
+    if not _has_dspy_file_handler:
+        _fh = logging.FileHandler('dspy_internal_debug.log', mode='a', encoding='utf-8')
+        _fh.setLevel(logging.INFO)
+        _fh.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        logger.addHandler(_fh)
+except Exception:
+    # Do not block if file handler cannot be configured
+    pass
+
 class DSPyGeminiLM(dspy.LM):
     """DSPy Gemini Language Model 適配器
     
