@@ -146,6 +146,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 
         except Exception as e:
             self.logger.error(f"優化版對話處理失敗: {e}")
+            self.logger.error("UNIFIED_FAILED: OptimizedDialogueManagerDSPy.process_turn exception", exc_info=True)
             
             # 嘗試從父類獲取回應，然後應用退化防護
             try:
@@ -167,24 +168,33 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                     
             except Exception as fallback_error:
                 self.logger.error(f"父類回退也失敗: {fallback_error}")
+                self.logger.error("FALLBACK_CHAIN_FAILED: super().process_turn exception", exc_info=True)
                 # 最終防護：生成安全的恢復回應
                 return self._generate_emergency_response(user_input)
     
     def _get_character_details(self) -> str:
-        """獲取角色詳細資訊的字串表示"""
+        """獲取角色詳細資訊的字串表示
+        - 優先使用 Character.details 字段（dict）
+        - 兼容舊設計：若 details 缺失，嘗試拼接已存在屬性
+        """
+        try:
+            if isinstance(self.character.details, dict) and self.character.details:
+                return json.dumps(self.character.details, ensure_ascii=False)
+        except Exception:
+            pass
+
         details = {}
-        
-        # 從角色對象獲取設定
-        if hasattr(self.character, 'fixed_settings'):
-            details.update(self.character.fixed_settings)
-        if hasattr(self.character, 'floating_settings'):
-            details.update(self.character.floating_settings)
-        
-        # 添加其他屬性
-        for attr in ['age', 'gender', 'medical_condition']:
+        # 回退：若 details 不可用，組裝已知屬性（通常不會進入）
+        for attr in ['fixed_settings', 'floating_settings', 'age', 'gender', 'medical_condition']:
             if hasattr(self.character, attr):
-                details[attr] = getattr(self.character, attr)
-        
+                try:
+                    val = getattr(self.character, attr)
+                    if isinstance(val, dict):
+                        details.update(val)
+                    else:
+                        details[attr] = val
+                except Exception:
+                    continue
         return json.dumps(details, ensure_ascii=False) if details else "{}"
     
     def _process_optimized_prediction(self, prediction) -> dict:
@@ -194,6 +204,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             state = getattr(prediction, 'state', 'NORMAL')
             dialogue_context = getattr(prediction, 'dialogue_context', '一般對話')
             context_classification = getattr(prediction, 'context_classification', 'daily_routine_examples')
+            processing_info = getattr(prediction, 'processing_info', None)
             
             # 確保回應格式正確
             if isinstance(responses, str):
@@ -213,6 +224,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 "state": state,
                 "dialogue_context": dialogue_context,
                 "context_classification": context_classification,
+                "processing_info": processing_info,
                 "optimization_info": {
                     "api_calls_used": 1,
                     "api_calls_saved": 2,
@@ -291,6 +303,14 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
         self.log_interaction(user_input, response_data["responses"], selected_response=gui_selected_response)
         self.save_interaction_log()
         
+        # 追加病患回應到對話歷史（選擇首個建議，便於下一輪提供上下文）
+        try:
+            if response_data.get("responses"):
+                top_resp = str(response_data["responses"][0])
+                self.conversation_history.append(f"{self.character.name}: {top_resp}")
+        except Exception:
+            pass
+        
         # 返回 JSON 格式回應
         return json.dumps(response_data, ensure_ascii=False)
     
@@ -350,11 +370,17 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                     degradation_indicators.append("self_introduction")
                     self.logger.warning(f"🚨 DETECTED: Self-introduction pattern in response {i+1}")
                 
-                # 檢測通用回應模式
-                if any(pattern in response_str for pattern in ["我可能沒有完全理解", "能請您換個方式說明", "您需要什麼幫助嗎"]):
+                # 檢測通用回應模式與錯誤模板
+                if any(pattern in response_str for pattern in ["我可能沒有完全理解", "能請您換個方式說明", "您需要什麼幫助嗎", "抱歉，我現在無法正確回應"]):
                     has_degradation = True
                     degradation_indicators.append("generic_responses")
                     self.logger.warning(f"🚨 DETECTED: Generic response pattern in response {i+1}")
+
+            # 若狀態為 CONFUSED，也視為退化並進行修復
+            if response_data.get("state") == "CONFUSED":
+                has_degradation = True
+                if "confused_state" not in degradation_indicators:
+                    degradation_indicators.append("confused_state")
             
             if has_degradation:
                 self.logger.warning(f"🚨 DEGRADATION PREVENTION: 檢測到退化模式 {degradation_indicators}，啟動修復機制")

@@ -135,24 +135,25 @@ class DialogueManagerDSPy(DialogueManager):
     
     def _get_character_details(self) -> Dict[str, Any]:
         """獲取角色詳細資訊"""
-        details = {}
-        
-        # 從角色對象獲取固定設定
-        if hasattr(self.character, 'fixed_settings'):
-            details.update(self.character.fixed_settings)
-        
-        # 從角色對象獲取浮動設定
-        if hasattr(self.character, 'floating_settings'):
-            details.update(self.character.floating_settings)
-        
-        # 添加其他角色屬性
-        if hasattr(self.character, 'age'):
-            details['age'] = self.character.age
-        if hasattr(self.character, 'gender'):
-            details['gender'] = self.character.gender
-        if hasattr(self.character, 'medical_condition'):
-            details['medical_condition'] = self.character.medical_condition
-            
+        # 優先使用 Character.details（配置來源）
+        try:
+            if isinstance(self.character.details, dict) and self.character.details:
+                return self.character.details
+        except Exception:
+            pass
+
+        details: Dict[str, Any] = {}
+        # 回退：嘗試聚合可能存在的屬性
+        for attr in ['fixed_settings', 'floating_settings', 'age', 'gender', 'medical_condition']:
+            if hasattr(self.character, attr):
+                try:
+                    val = getattr(self.character, attr)
+                    if isinstance(val, dict):
+                        details.update(val)
+                    else:
+                        details[attr] = val
+                except Exception:
+                    continue
         return details
     
     def _process_dspy_prediction(self, prediction) -> Dict[str, Any]:
@@ -246,6 +247,14 @@ class DialogueManagerDSPy(DialogueManager):
         # 記錄互動
         self.log_interaction(user_input, response_data["responses"], selected_response=gui_selected_response)
         self.save_interaction_log()
+        
+        # 將AI首選回應追加至對話歷史，提升下一輪上下文品質
+        try:
+            if response_data.get("responses"):
+                top_resp = str(response_data["responses"][0])
+                self.conversation_history.append(f"{self.character.name}: {top_resp}")
+        except Exception:
+            pass
         
         # 返回 JSON 格式回應
         return json.dumps(response_data, ensure_ascii=False)
