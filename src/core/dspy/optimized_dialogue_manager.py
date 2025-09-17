@@ -14,13 +14,14 @@ from typing import Optional, Union
 from ..dialogue import DialogueManager
 from ..character import Character
 from .unified_dialogue_module import UnifiedDSPyDialogueModule
+from .sensitive_question_module import SensitiveQuestionRewriteModule
 
 logger = logging.getLogger(__name__)
 
 
 class OptimizedDialogueManagerDSPy(DialogueManager):
     """優化版 DSPy 對話管理器
-    
+
     主要優化：
     - API 調用從 3次 減少到 1次 (節省 66.7% 配額使用)
     - 保持完全的 API 兼容性
@@ -46,6 +47,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             self.dialogue_module = UnifiedDSPyDialogueModule()
             self.optimization_enabled = True
             self.logger.info("優化統一對話模組初始化成功 - API 調用節省 66.7%")
+            self.sensitive_question_module = SensitiveQuestionRewriteModule()
         except Exception as e:
             self.logger.error(f"統一對話模組初始化失敗: {e}")
             self.optimization_enabled = False
@@ -53,6 +55,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             from .dialogue_manager_dspy import DialogueManagerDSPy
             fallback_manager = DialogueManagerDSPy(character, use_terminal, log_dir)
             self.dialogue_module = fallback_manager.dialogue_module
+            self.sensitive_question_module = getattr(fallback_manager, 'sensitive_question_module', SensitiveQuestionRewriteModule())
             self.logger.warning("已回退到原始 DSPy 實現")
         
         # 統計追蹤
@@ -125,10 +128,15 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 if self.optimization_stats['total_conversations'] > 0 else 0
             )
             
-            # 處理回應結果
-            response_data = self._process_optimized_prediction(prediction)
-            
-            # 關鍵修復：檢查並修復退化回應
+            # 讓 rewrite 模組決策是否需要改寫
+            rewrite_result = self._attempt_sensitive_rewrite(user_input, prediction)
+
+            if rewrite_result:
+                response_data = rewrite_result
+            else:
+                response_data = self._process_optimized_prediction(prediction)
+
+            # 僅監測退化狀態，不改寫回應內容
             response_data = self._apply_degradation_prevention(response_data, user_input)
             
             # ====== Phase 1.3: 會話狀態變化追蹤 ======
@@ -211,14 +219,57 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 try:
                     responses = json.loads(responses)
                 except json.JSONDecodeError:
-                    responses = [responses]
+                    import ast as _ast
+                    try:
+                        parsed = _ast.literal_eval(responses)
+                        if isinstance(parsed, list):
+                            responses = parsed
+                        else:
+                            responses = [responses]
+                    except Exception:
+                        responses = [responses]
             
             if not isinstance(responses, list):
                 responses = [str(responses)]
-            
+
             if not responses:
                 responses = ["我需要一點時間思考..."]
-            
+
+            normalized_list = []
+            for item in responses:
+                if isinstance(item, list):
+                    normalized_list.extend([str(x) for x in item])
+                    continue
+
+                if isinstance(item, str):
+                    s = item.strip()
+                    if s.startswith('['):
+                        candidate = s
+                        if not s.endswith(']'):
+                            closing = s.rfind(']')
+                            if closing != -1:
+                                candidate = s[:closing + 1]
+                        parsed = None
+                        try:
+                            parsed = json.loads(candidate)
+                        except json.JSONDecodeError:
+                            import ast as _ast
+                            try:
+                                parsed = _ast.literal_eval(candidate)
+                            except Exception:
+                                parsed = None
+                        if isinstance(parsed, list):
+                            normalized_list.extend([str(x) for x in parsed])
+                            remainder = s[len(candidate):].strip()
+                            if remainder:
+                                normalized_list.append(remainder)
+                            continue
+                    normalized_list.append(s)
+                else:
+                    normalized_list.append(str(item))
+
+            responses = normalized_list[:5]
+
             return {
                 "responses": responses,
                 "state": state,
@@ -305,9 +356,9 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
         
         # 追加病患回應到對話歷史（選擇首個建議，便於下一輪提供上下文）
         try:
-            if response_data.get("responses"):
-                top_resp = str(response_data["responses"][0])
-                self.conversation_history.append(f"{self.character.name}: {top_resp}")
+            normalized = self._normalize_responses(response_data.get("responses", []))
+            if normalized:
+                self.conversation_history.append(f"{self.character.name}: {normalized[0]}")
         except Exception:
             pass
         
@@ -384,23 +435,11 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             
             if has_degradation:
                 self.logger.warning(f"🚨 DEGRADATION PREVENTION: 檢測到退化模式 {degradation_indicators}，啟動修復機制")
-                
-                # 生成修復後的回應
-                fixed_responses = self._generate_recovery_responses(user_input)
-                
-                response_data["responses"] = fixed_responses
-                response_data["state"] = "NORMAL"
-                response_data["dialogue_context"] = "已修復的醫療對話"
-                response_data["recovery_applied"] = True
+                response_data["degradation_detected"] = True
                 response_data["original_degradation"] = degradation_indicators
-                
-                # 觸發上下文重置以防止後續退化
-                self._trigger_context_reset()
-                
-                self.logger.info(f"✅ DEGRADATION PREVENTION: 退化修復完成，生成 {len(fixed_responses)} 個修復回應")
             else:
                 self.logger.info(f"✅ DEGRADATION PREVENTION: No degradation detected, keeping original responses")
-            
+
             return response_data
             
         except Exception as e:
@@ -408,53 +447,6 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             import traceback
             self.logger.error(f"🚨 DEGRADATION PREVENTION: Traceback: {traceback.format_exc()}")
             return response_data
-    
-    def _generate_recovery_responses(self, user_input: str) -> list:
-        """生成恢復性回應，基於角色設定和輸入內容"""
-        # 基於用戶輸入生成適合的病患回應
-        input_lower = user_input.lower()
-        
-        if "感覺" in user_input or "怎麼樣" in user_input:
-            return [
-                "還可以，傷口有點緊繃。",
-                "恢復得還不錯，就是有點累。",
-                "還行，但有時會覺得不太舒服。",
-                "目前狀況還穩定。",
-                "感覺比昨天好一些了。"
-            ]
-        elif "發燒" in user_input or "不舒服" in user_input:
-            return [
-                "目前沒有發燒，但傷口周圍有點腫脹。",
-                "沒有發燒，但偶爾會覺得有點痛。",
-                "體溫正常，就是有些疲勞。",
-                "沒有明顯發燒症狀。",
-                "目前沒有發燒，但休息不太好。"
-            ]
-        elif "症狀" in user_input:
-            return [
-                "主要就是傷口有點緊繃感。",
-                "偶爾會覺得有點疼痛，其他還好。",
-                "就是吃東西時有點困難。",
-                "沒有其他特別不舒服的地方。",
-                "除了傷口，其他都還正常。"
-            ]
-        elif "檢查" in user_input:
-            return [
-                "好，都聽你們的安排。",
-                "可以，檢查是必要的。",
-                "沒問題，什麼時候檢查？",
-                "好的，我會配合。",
-                "需要做什麼準備嗎？"
-            ]
-        else:
-            # 通用恢復回應
-            return [
-                "好的，我知道了。",
-                "嗯，聽起來合理。",
-                "我會配合治療的。",
-                "謝謝你的關心。",
-                "那就麻煩你們了。"
-            ]
     
     def _trigger_context_reset(self):
         """觸發上下文重置，防止後續退化"""
@@ -472,6 +464,101 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 
         except Exception as e:
             self.logger.error(f"上下文重置失敗: {e}")
+
+
+    def _normalize_responses(self, responses) -> list:
+        if isinstance(responses, str):
+            return [responses.strip()] if responses.strip() else []
+        if isinstance(responses, list):
+            return [str(item).strip() for item in responses if str(item).strip()]
+        if responses is None:
+            return []
+        return [str(responses).strip()]
+
+    def _attempt_sensitive_rewrite(self, original_question: str, base_prediction=None):
+        """Ask Gemini to rewrite the question and fetch a new response."""
+        try:
+            if not hasattr(self, 'sensitive_question_module'):
+                return None
+
+            conversation_summary = "\n".join(self.conversation_history[-6:])
+            rewrite_prediction = self.sensitive_question_module.rewrite(
+                original_question=original_question,
+                conversation_summary=conversation_summary,
+                character_name=self.character.name,
+                character_persona=self.character.persona,
+            )
+
+            if not rewrite_prediction:
+                self.logger.warning("Sensitive rewrite module returned None")
+                return None
+
+            sensitivity_flag = str(getattr(rewrite_prediction, 'sensitivity_flag', '')).strip()
+            rewritten_question = str(getattr(rewrite_prediction, 'rewritten_question', '')).strip()
+            reason = str(getattr(rewrite_prediction, 'sensitivity_reason', '')).strip()
+            reassurance = str(getattr(rewrite_prediction, 'reassurance_message', '')).strip()
+
+            normalized_flag = sensitivity_flag.upper()
+            should_use_rewrite = normalized_flag in {'YES', 'TRUE', 'SENSITIVE'} and rewritten_question
+
+            if not should_use_rewrite:
+                self.logger.warning(
+                    "Sensitive rewrite probe completed but flag=%s (reason=%s); skipping fallback.",
+                    sensitivity_flag or 'UNKNOWN',
+                    reason or '未提供',
+                )
+                return None
+
+            self.logger.warning(
+                "Gemini policy refusal detected. Reason: %s", reason or '未提供'
+            )
+            self.logger.warning(
+                "Original question: %s | Rewritten as: %s",
+                original_question,
+                rewritten_question,
+            )
+
+            # Replace the last caregiver entry with the rewritten question for context continuity
+            if self.conversation_history and self.conversation_history[-1].startswith("護理人員: "):
+                self.conversation_history[-1] = f"護理人員(重述): {rewritten_question}"
+            else:
+                self.conversation_history.append(f"護理人員(重述): {rewritten_question}")
+
+            rewritten_prediction = self.dialogue_module(
+                user_input=rewritten_question,
+                character_name=self.character.name,
+                character_persona=self.character.persona,
+                character_backstory=self.character.backstory,
+                character_goal=self.character.goal,
+                character_details=self._get_character_details(),
+                conversation_history=self._format_conversation_history()
+            )
+
+            response_data = self._process_optimized_prediction(rewritten_prediction)
+            response_data["sensitive_rewrite_pending"] = True
+            response_data = self._apply_degradation_prevention(response_data, rewritten_question)
+            response_data.pop("sensitive_rewrite_pending", None)
+            response_data["sensitive_rewrite_applied"] = True
+            response_data["sensitive_rewrite"] = {
+                "original_question": original_question,
+                "rewritten_question": rewritten_question,
+                "reason": reason,
+                "reassurance": reassurance,
+            }
+
+            explanation = reason or "原始提問可能觸及敏感政策"
+            notice = f"提醒：{explanation}。已改寫為「{rewritten_question}」。"
+            if reassurance:
+                notice = f"{notice} {reassurance}"
+
+            rewritten_responses = response_data.get("responses", [])
+            enriched = [notice] + rewritten_responses
+            response_data["responses"] = enriched[:5]
+            return response_data
+
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.error(f"Sensitive rewrite flow failed: {exc}", exc_info=True)
+            return None
     
     def _track_session_state_changes(self, user_input: str, response_data: dict, round_number: int):
         """追蹤會話狀態變化和退化指標
@@ -543,7 +630,6 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 "Dialogue_State": state,
                 "Dialogue_Context": context,
                 "Round_Number": round_number,
-                "Has_Recovery_Applied": response_data.get("recovery_applied", False),
                 "Original_Degradation": response_data.get("original_degradation", []),
                 "Emergency_Recovery": response_data.get("emergency_recovery", False)
             }
@@ -654,11 +740,6 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 risk_score += 0.1
                 risk_factors.append("Confused_State")
             
-            # 已應用恢復的風險
-            if response_data.get("recovery_applied"):
-                risk_score += 0.2
-                risk_factors.append("Recovery_Applied")
-            
             # 確定風險等級
             if risk_score >= 0.7:
                 risk_level = "HIGH"
@@ -749,10 +830,10 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
     def _generate_emergency_response(self, user_input: str) -> str:
         """生成緊急恢復回應，當所有其他方法都失敗時使用"""
         self.logger.warning(f"🚨 生成緊急恢復回應 for: {user_input}")
-        
-        # 根據輸入生成基本的病患回應
-        emergency_responses = self._generate_recovery_responses(user_input)
-        
+        emergency_responses = [
+            "抱歉，目前系統無法提供回應，請稍後再試或通知護理人員。"
+        ]
+
         emergency_data = {
             "status": "success",
             "responses": emergency_responses,

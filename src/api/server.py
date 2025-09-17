@@ -571,7 +571,13 @@ async def format_dialogue_response(
                     if isinstance(parsed, list):
                         response_dict["responses"] = [str(x) for x in parsed[:5]]
                 except json.JSONDecodeError:
-                    pass
+                    import ast as _ast
+                    try:
+                        parsed = _ast.literal_eval(s)
+                        if isinstance(parsed, list):
+                            response_dict["responses"] = [str(x) for x in parsed[:5]]
+                    except Exception:
+                        pass
             else:
                 # 以換行分割成多行選項
                 lines = [line.strip() for line in s.split('\n') if line.strip()]
@@ -582,38 +588,37 @@ async def format_dialogue_response(
             response_dict["responses"] = [str(response_dict.get("responses"))]
         else:
             response_dict["responses"] = [str(x) for x in response_dict["responses"]]
+
+        # 深層解析：若列表中的元素仍是字串形式的列表，進一步展開
+        expanded = []
+        for item in response_dict["responses"]:
+            text = str(item)
+            trimmed = text.strip()
+            if trimmed.startswith('['):
+                candidate = trimmed
+                if not trimmed.endswith(']'):
+                    closing = trimmed.rfind(']')
+                    if closing != -1:
+                        candidate = trimmed[:closing + 1]
+                try:
+                    parsed = json.loads(candidate)
+                except json.JSONDecodeError:
+                    import ast as _ast
+                    try:
+                        parsed = _ast.literal_eval(candidate)
+                    except Exception:
+                        parsed = None
+                if isinstance(parsed, list):
+                    expanded.extend(str(x) for x in parsed)
+                    remainder = trimmed[len(candidate):].strip()
+                    if remainder:
+                        expanded.append(remainder)
+                    continue
+            expanded.append(text)
+        if expanded:
+            response_dict["responses"] = expanded[:5]
     except Exception as _e:
         logger.warning(f"規範化 responses 失敗: {_e}")
-    
-    # 處理 CONFUSED 狀態，提供更好的備用回應
-    if response_dict["state"] == "CONFUSED" and session and "dialogue_manager" in session:
-        # 重要診斷標記：伺服器層回退被觸發
-        logger.warning("SERVER_FALLBACK_TRIGGERED: Replacing CONFUSED response with fallback template")
-        try:
-            logger.warning(f"SERVER_FALLBACK_ORIGINAL: {response_dict}")
-        except Exception:
-            pass
-
-        character = session["dialogue_manager"].character
-        logger.info(f"將 CONFUSED 回應替換為角色適當的回應")
-        character_name = character.name
-        character_persona = character.persona
-        
-        # 中性、多樣化的備用回應（避免自我介紹與通用模板）
-        neutral_responses = [
-            "還可以，就是傷口有點緊繃。",
-            "這兩天比較累，休息還在調整中。",
-            "目前沒有發燒，偶爾會覺得有點疼。",
-            "吃東西有點不太方便，其他還好。",
-            "整體還行，謝謝關心。"
-        ]
-
-        # 直接提供多個選項，改善單一回應問題
-        response_dict["responses"] = neutral_responses
-        response_dict["state"] = "NORMAL"  # 改為 NORMAL 狀態
-        response_dict["dialogue_context"] = "一般問診對話"
-        
-        logger.info(f"生成備用回應: {response_dict['responses'][0]}")
     
     # Phase 5: 準備版本信息和性能指標
     implementation_version = "original"

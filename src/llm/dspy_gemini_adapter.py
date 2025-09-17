@@ -9,6 +9,8 @@ import dspy
 import logging
 import json
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
 from .gemini_client import GeminiClient
 from ..core.dspy.config import get_config
@@ -29,15 +31,20 @@ logger = logging.getLogger(__name__)
 
 # Ensure a dedicated debug log file exists for prompt/response inspection
 try:
+    debug_log_dir = Path("logs") / "debug"
+    debug_log_dir.mkdir(parents=True, exist_ok=True)
+    debug_log_path = debug_log_dir / f"dspy_internal_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
     _has_dspy_file_handler = any(
-        isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', '').endswith('dspy_internal_debug.log')
+        isinstance(h, logging.FileHandler) and 'dspy_internal_debug_' in getattr(h, 'baseFilename', '')
         for h in logger.handlers
     )
     if not _has_dspy_file_handler:
-        _fh = logging.FileHandler('dspy_internal_debug.log', mode='a', encoding='utf-8')
+        _fh = logging.FileHandler(debug_log_path, mode='a', encoding='utf-8')
         _fh.setLevel(logging.INFO)
         _fh.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
         logger.addHandler(_fh)
+        logger.info("Gemini debug log file initialised at %s", debug_log_path)
 except Exception:
     # Do not block if file handler cannot be configured
     pass
