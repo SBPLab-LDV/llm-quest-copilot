@@ -12,6 +12,8 @@ __pycache__/
 .idea/ 
 
 logs/
+!logs/dialogue_quality/
+!logs/dialogue_quality/*.log
 recordings/
 third_party/
 markitdown/
