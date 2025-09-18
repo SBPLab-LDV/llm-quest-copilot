@@ -518,9 +518,13 @@ async def format_dialogue_response(
     except json.JSONDecodeError as e:
         logger.error(f"解析 JSON 失敗: {e}")
         response_dict = {
-            "responses": ["抱歉，處理您的請求時出現了問題"],
-            "state": "CONFUSED",
-            "dialogue_context": "未知上下文"
+            "responses": [f"JSONDecodeError: {e}"],
+            "state": "ERROR",
+            "dialogue_context": "JSON_PARSE_ERROR",
+            "error": {
+                "type": "JSONDecodeError",
+                "message": str(e)
+            }
         }
     
     # 找出當前會話ID
@@ -533,16 +537,16 @@ async def format_dialogue_response(
     
     # 確保所有必要的鍵都存在於字典中，使用合理的預設值
     if "responses" not in response_dict or not response_dict["responses"]:
-        logger.warning("回應中缺少 responses 鍵或為空，使用默認值")
-        response_dict["responses"] = ["抱歉，我需要一些時間處理您的問題"]
-    
+        logger.warning("回應中缺少 responses 鍵或為空")
+        response_dict["responses"] = []
+
     if "state" not in response_dict:
         logger.warning("回應中缺少 state 鍵，使用默認值")
-        response_dict["state"] = "CONFUSED"
-    
+        response_dict["state"] = "UNKNOWN"
+
     if "dialogue_context" not in response_dict:
         logger.warning("回應中缺少 dialogue_context 鍵，使用默認值")
-        response_dict["dialogue_context"] = "未知上下文"
+        response_dict["dialogue_context"] = ""
 
     # 規範化 responses：修正 "['a','b']" 等字串化列表為真正列表，或單字串/多行轉為列表
     try:
@@ -585,7 +589,7 @@ async def format_dialogue_response(
                     response_dict["responses"] = lines[:5]
         # 最終保證為字串列表
         if not isinstance(response_dict.get("responses"), list):
-            response_dict["responses"] = [str(response_dict.get("responses"))]
+            response_dict["responses"] = [str(response_dict.get("responses"))] if response_dict.get("responses") is not None else []
         else:
             response_dict["responses"] = [str(x) for x in response_dict["responses"]]
 
@@ -662,12 +666,11 @@ async def format_dialogue_response(
         return response
     except Exception as e:
         logger.error(f"創建 DialogueResponse 時出錯: {e}", exc_info=True)
-        # 提供一個回退方案，創建一個基本的回應
         return DialogueResponse(
             status="error",
-            responses=["抱歉，處理您的請求時出現錯誤"],
-            state="CONFUSED",
-            dialogue_context="錯誤處理",
+            responses=[f"DialogueResponseError[{type(e).__name__}]: {e}"],
+            state="ERROR",
+            dialogue_context="DIALOGUE_RESPONSE_EXCEPTION",
             session_id=current_session_id or str(uuid.uuid4()),
             speech_recognition_options=None,
             implementation_version=implementation_version,

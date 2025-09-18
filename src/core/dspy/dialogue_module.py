@@ -318,13 +318,10 @@ class DSPyDialogueModule(dspy.Module):
             
             # 返回預設回應 - 添加錯誤信息以便調試
             return dspy.Prediction(
-                responses=[
-                    f"系統調試：DSPy生成失敗 - {type(e).__name__}",
-                    "我需要一點時間思考...", 
-                    "能否再說一遍？"
-                ],
-                state="CONFUSED",
-                dialogue_context=f"系統錯誤: {str(e)[:50]}..."
+                responses=[f"DSPySignatureError[{type(e).__name__}]: {e}"],
+                state="ERROR",
+                dialogue_context="DSPY_SIGNATURE_EXCEPTION",
+                raw_prediction=None
             )
     
     def _determine_state_transition(self, user_input: str, current_state: str,
@@ -386,8 +383,8 @@ class DSPyDialogueModule(dspy.Module):
                 return [str(responses)]
                 
         except Exception as e:
-            logger.error(f"回應格式處理失敗: {e}")
-            return ["抱歉，我現在有些困惑", "能否重新說一遍？", "讓我想想..."]
+            logger.error(f"回應格式處理失敗: {e}", exc_info=True)
+            return [f"ResponseFormatError[{type(e).__name__}]: {e}"]
     
     def _get_available_contexts(self) -> str:
         """獲取可用情境列表
@@ -437,23 +434,19 @@ class DSPyDialogueModule(dspy.Module):
     
     def _create_error_response(self, user_input: str, error_message: str) -> dspy.Prediction:
         """創建錯誤回應
-        
+
         Args:
             user_input: 原始用戶輸入
             error_message: 錯誤訊息
-            
+
         Returns:
             錯誤回應預測
         """
         return dspy.Prediction(
             user_input=user_input,
-            responses=[
-                "抱歉，我現在有些困惑，能否重新說一遍？",
-                "讓我重新整理一下思緒...",
-                "我需要一點時間思考這個問題"
-            ],
-            state="CONFUSED",
-            dialogue_context="系統錯誤",
+            responses=[f"DSPyModuleError: {error_message}"],
+            state="ERROR",
+            dialogue_context="DSPY_MODULE_EXCEPTION",
             confidence=0.0,
             error=error_message,
             processing_info={

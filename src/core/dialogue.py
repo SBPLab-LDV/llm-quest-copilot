@@ -227,22 +227,34 @@ class DialogueManager:
             
         except json.JSONDecodeError as e:
             self.current_state = DialogueState.CONFUSED
-            error_response = {
-                "responses": ["對不起，我現在有點混亂，能請你重複一次嗎？"],
-                "state": self.current_state.value
+            error_text = f"JSONDecodeError: {e}"
+            error_payload = {
+                "responses": [error_text],
+                "state": "ERROR",
+                "dialogue_context": "JSON_DECODE_ERROR",
+                "error": {
+                    "type": "JSONDecodeError",
+                    "message": str(e)
+                }
             }
-            error_response_json_string = json.dumps(error_response)
-            self.log_interaction(user_input, error_response_json_string, selected_response=None) # 記錄錯誤, selected_response 設為 None
-            self.save_interaction_log() # 儲存日誌
-            return error_response_json_string if not self.use_terminal else "對不起，我現在有點混亂，能請你重複一次嗎？"
-            
+            error_response_json_string = json.dumps(error_payload, ensure_ascii=False)
+            self.log_interaction(user_input, error_response_json_string, selected_response=None)
+            self.save_interaction_log()
+            return error_response_json_string if not self.use_terminal else error_text
+
         except Exception as e:
             self.current_state = DialogueState.CONFUSED
-            error_response = {
-                "responses": ["抱歉，我現在無法正確回應"],
-                "state": self.current_state.value
+            error_text = f"Exception[{type(e).__name__}]: {e}"
+            error_payload = {
+                "responses": [error_text],
+                "state": "ERROR",
+                "dialogue_context": "UNHANDLED_EXCEPTION",
+                "error": {
+                    "type": type(e).__name__,
+                    "message": str(e)
+                }
             }
-            error_response_json_string = json.dumps(error_response)
-            self.log_interaction(user_input, error_response_json_string, selected_response=None) # 記錄錯誤, selected_response 設為 None
-            self.save_interaction_log() # 儲存日誌
-            return error_response_json_string if not self.use_terminal else "抱歉，我現在無法正確回應"
+            error_response_json_string = json.dumps(error_payload, ensure_ascii=False)
+            self.log_interaction(user_input, error_response_json_string, selected_response=None)
+            self.save_interaction_log()
+            return error_response_json_string if not self.use_terminal else error_text

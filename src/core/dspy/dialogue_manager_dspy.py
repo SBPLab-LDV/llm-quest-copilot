@@ -173,11 +173,7 @@ class DialogueManagerDSPy(DialogueManager):
             
             if not isinstance(responses, list):
                 responses = [str(responses)]
-            
-            # 確保至少有一個回應
-            if not responses:
-                responses = ["我需要一點時間思考..."]
-            
+
             return {
                 "responses": responses,
                 "state": state,
@@ -185,12 +181,8 @@ class DialogueManagerDSPy(DialogueManager):
             }
             
         except Exception as e:
-            self.logger.error(f"Error processing DSPy prediction: {e}")
-            return {
-                "responses": ["抱歉，我現在無法正確回應"],
-                "state": "CONFUSED",
-                "dialogue_context": "錯誤情況"
-            }
+            self.logger.error(f"Error processing DSPy prediction: {e}", exc_info=True)
+            raise
     
     def _update_dialogue_state(self, response_data: Dict[str, Any]):
         """更新對話狀態"""

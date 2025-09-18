@@ -232,9 +232,6 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             if not isinstance(responses, list):
                 responses = [str(responses)]
 
-            if not responses:
-                responses = ["我需要一點時間思考..."]
-
             normalized_list = []
             for item in responses:
                 if isinstance(item, list):
@@ -284,11 +281,15 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             }
             
         except Exception as e:
-            self.logger.error(f"優化預測結果處理失敗: {e}")
+            self.logger.error(f"優化預測結果處理失敗: {e}", exc_info=True)
             return {
-                "responses": ["抱歉，處理過程中發生錯誤"],
-                "state": "CONFUSED",
-                "dialogue_context": "系統錯誤"
+                "responses": [f"OptimizedPredictionError[{type(e).__name__}]: {e}"],
+                "state": "ERROR",
+                "dialogue_context": "OPTIMIZED_PREDICTION_EXCEPTION",
+                "error": {
+                    "type": type(e).__name__,
+                    "message": str(e)
+                }
             }
     
     def _update_dialogue_state(self, response_data: dict):
@@ -831,7 +832,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
         """生成緊急恢復回應，當所有其他方法都失敗時使用"""
         self.logger.warning(f"🚨 生成緊急恢復回應 for: {user_input}")
         emergency_responses = [
-            "抱歉，目前系統無法提供回應，請稍後再試或通知護理人員。"
+            "EmergencyFallback: dialogue manager failed to recover; please review server logs."
         ]
 
         emergency_data = {

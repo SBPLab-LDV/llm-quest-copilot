@@ -344,8 +344,8 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             
             return [str(responses)]
         except Exception as e:
-            logger.error(f"回應格式處理失敗: {e}")
-            return ["抱歉，我現在有些困惑", "能否重新說一遍？", "讓我想想..."]
+            logger.error(f"回應格式處理失敗: {e}", exc_info=True)
+            return [f"UnifiedResponseFormatError[{type(e).__name__}]: {e}"]
     
     
     def _get_enhanced_conversation_history(self, conversation_history: List[str], 
@@ -457,33 +457,12 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         if not responses:
             return responses
 
-        fixed = list(responses)
-
+        # 目前僅記錄一致性結果，不再修改 Gemini 回覆內容，以便檢視原始輸出。
         try:
-            # 判定類型集合
-            types = {c.type for c in consistency_result.contradictions}
-
-            # high 等級：過濾自我介紹與過度通用回應
-            if consistency_result.severity == 'high':
-                fixed = [r for r in fixed if all(k not in str(r) for k in ["我是Patient", "您好，我是", "我是"])]
-                fixed = [r for r in fixed if all(k not in str(r) for k in ["我可能沒有完全理解", "您需要什麼幫助"])]
-                # 若全被清空，提供安全的中性回應，避免回灌原始矛盾內容
-                if not fixed:
-                    fixed = [
-                        "還可以，傷口有點緊繃。",
-                        "目前狀況還算穩定。",
-                        "偶爾會覺得有點不舒服。"
-                    ]
-
-            # medium/low：加提示尾註，避免破壞原意
-            else:
-                hint = "（保持與先前陳述一致）"
-                fixed = [r if hint in str(r) else f"{r}{hint}" for r in fixed]
-
-            # 最多保留 5 則
-            return fixed[:5]
+            _ = {c.type for c in consistency_result.contradictions}
         except Exception:
-            return responses
+            pass
+        return list(responses)
 
 
 # 工廠函數

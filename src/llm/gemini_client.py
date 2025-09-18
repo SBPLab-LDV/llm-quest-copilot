@@ -75,10 +75,14 @@ class GeminiClient:
             return response_text
             
         except Exception as e:
-            # 記錄錯誤
             self.logger.error(f"Gemini API 呼叫失敗: {e}", exc_info=True)
-            # 如果生成失敗，返回一個基本的錯誤回應
-            return '{"responses": ["抱歉，我現在無法正確回應"],"state": "CONFUSED"}'
+            error_payload = {
+                "error": {
+                    "type": type(e).__name__,
+                    "message": str(e)
+                }
+            }
+            return json.dumps(error_payload, ensure_ascii=False)
     
     def transcribe_audio(self, audio_file_path: str) -> str:
         """將音頻文件轉換為文本，同時處理斷斷續續的語音並提供多個可能的完整句子選項

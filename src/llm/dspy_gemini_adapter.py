@@ -345,20 +345,23 @@ class DSPyGeminiLM(dspy.LM):
             
         except Exception as e:
             self.error_count += 1
-            logger.error(f"Gemini API 調用失敗 (第 {self.call_count} 次): {e}")
-            
-            # 返回完整鍵集合的錯誤回應，避免 JSONAdapter 解析失敗
-            fallback = {
-                "reasoning": "系統錯誤，使用安全回退。",
-                "character_consistency_check": "NO",
-                "context_classification": "unknown",
+            logger.error(f"Gemini API 調用失敗 (第 {self.call_count} 次): {e}", exc_info=True)
+
+            error_payload = {
+                "reasoning": f"Gemini invocation failed: {type(e).__name__}",
+                "character_consistency_check": "UNKNOWN",
+                "context_classification": "error",
                 "confidence": "0.00",
-                "responses": ["抱歉，我現在無法正確回應"],
-                "state": "CONFUSED",
-                "dialogue_context": "系統錯誤",
-                "state_reasoning": "LLM 調用異常，啟用回退。"
+                "responses": [f"GeminiError[{type(e).__name__}]: {e}"],
+                "state": "ERROR",
+                "dialogue_context": "GEMINI_EXCEPTION",
+                "state_reasoning": "Gemini API raised an exception",
+                "error": {
+                    "type": type(e).__name__,
+                    "message": str(e)
+                }
             }
-            return json.dumps(fallback, ensure_ascii=False)
+            return json.dumps(error_payload, ensure_ascii=False)
     
     def _clean_markdown_json(self, response: str) -> str:
         """清理 Gemini 回應中的 markdown 代碼塊格式
@@ -419,13 +422,13 @@ class DSPyGeminiLM(dspy.LM):
             # 補齊缺失鍵
             defaults = {
                 "reasoning": "",
-                "character_consistency_check": "YES",
-                "context_classification": "daily_routine_examples",
-                "confidence": "0.90",
-                "responses": ["我明白了，請繼續。"],
-                "state": "NORMAL",
-                "dialogue_context": "對話進行中",
-                "state_reasoning": "自動補齊缺失鍵以維持格式完整"
+                "character_consistency_check": "UNKNOWN",
+                "context_classification": "unspecified",
+                "confidence": "0.00",
+                "responses": [],
+                "state": "UNKNOWN",
+                "dialogue_context": "",
+                "state_reasoning": "Fields auto-filled due to missing data"
             }
 
             for k in required:
