@@ -11,9 +11,8 @@ __pycache__/
 .vscode/
 .idea/ 
 
-logs/
-!logs/dialogue_quality/
-!logs/dialogue_quality/*.log
+# Log files are tracked via Git LFS (see .gitattributes), so do not ignore this directory.
+ui_debug.log
 recordings/
 third_party/
 markitdown/
