@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Union
 import dspy
 
 logger = logging.getLogger(__name__)
+logger.propagate = True
 
 
 class DSPyResponse:
@@ -29,12 +30,13 @@ class DSPyResponse:
 
 _DEBUG_LOG_DIR = Path("logs") / "debug"
 _DEBUG_LOG_HANDLER: Optional[logging.FileHandler] = None
+_ROOT_DEBUG_LOG_HANDLER: Optional[logging.FileHandler] = None
 
 
 def start_dspy_debug_log(tag: Optional[str] = None) -> Optional[Path]:
     """Create a timestamped DSPy debug log file for the current session."""
 
-    global _DEBUG_LOG_HANDLER
+    global _DEBUG_LOG_HANDLER, _ROOT_DEBUG_LOG_HANDLER
 
     try:
         _DEBUG_LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -58,8 +60,20 @@ def start_dspy_debug_log(tag: Optional[str] = None) -> Optional[Path]:
             except Exception:
                 logger.warning("Failed to close previous DSPy debug log handler", exc_info=True)
 
+        if _ROOT_DEBUG_LOG_HANDLER:
+            root_logger = logging.getLogger()
+            root_logger.removeHandler(_ROOT_DEBUG_LOG_HANDLER)
+            try:
+                _ROOT_DEBUG_LOG_HANDLER.close()
+            except Exception:
+                logger.warning("Failed to close previous root debug log handler", exc_info=True)
+
         _DEBUG_LOG_HANDLER = handler
         logger.addHandler(handler)
+
+        root_logger = logging.getLogger()
+        root_logger.addHandler(handler)
+        _ROOT_DEBUG_LOG_HANDLER = handler
         logger.info("DSPy debug log started at %s", debug_log_path)
         return debug_log_path
 
@@ -331,4 +345,3 @@ class BaseDSPyLM(dspy.LM):
         """Invoke the underlying provider. Subclasses must implement."""
 
         raise NotImplementedError
-

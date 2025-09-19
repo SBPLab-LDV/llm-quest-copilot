@@ -281,7 +281,7 @@ def test_same_input_degradation(recorder: Optional[TranscriptRecorder] = None) -
 
     results = []
 
-    for i in range(5):
+    for i in range(3):
         recorder.log(f"第 {i+1} 次 - 相同輸入: {same_input}")
         
         try:

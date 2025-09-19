@@ -12,6 +12,7 @@ from ..core.dspy.config import get_config
 
 
 logger = logging.getLogger(__name__)
+logger.propagate = True
 
 
 OPTION_MAP = {
