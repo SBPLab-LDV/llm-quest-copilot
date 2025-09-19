@@ -21,13 +21,18 @@ JSON_OUTPUT_DIRECTIVE = (
     "[指示] 僅輸出單一 JSON 物件，欄位依序為 "
     "reasoning, character_consistency_check, context_classification, confidence, "
     "responses, state, dialogue_context, state_reasoning；responses 必須是 5 個短句字串的陣列，"
-    "所有回應必須使用繁體中文，且不得向護理人員反問。禁止使用 [[ ## field ## ]]、markdown 標記或任何額外文字，"
-    "且所有鍵與值都需使用雙引號。"
+    "所有回應必須使用繁體中文，且不得向護理人員反問。state 欄位僅允許 NORMAL、CONFUSED、TRANSITIONING 或 TERMINATED。"
+    "禁止使用 [[ ## field ## ]]、markdown 標記或任何額外文字，且所有鍵與值都需使用雙引號。"
 )
 
 PERSONA_REMINDER_TEMPLATE = (
     "[角色提醒] 您是 {name}，{persona}。確保與上方醫療事實一致，" 
     "不得自我介紹或自稱 AI，所有回應需使用繁體中文。"
+)
+
+COMMON_ERROR_REMINDER = (
+    "[常見錯誤提醒] 不要重複護理人員的提問、不提供多位陪伴者、" 
+    "不得詢問護士、維持病患視角與語氣。"
 )
 
 DEFAULT_CONTEXT_PRIORITY = [
@@ -135,9 +140,9 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             
             # 將輸出格式要求附加到提示末端
             if formatted_history:
-                formatted_history = f"{formatted_history}\n{JSON_OUTPUT_DIRECTIVE}"
+                formatted_history = f"{formatted_history}\n{COMMON_ERROR_REMINDER}\n{JSON_OUTPUT_DIRECTIVE}"
             else:
-                formatted_history = JSON_OUTPUT_DIRECTIVE
+                formatted_history = f"{COMMON_ERROR_REMINDER}\n{JSON_OUTPUT_DIRECTIVE}"
 
             # 獲取精簡後的可用情境清單
             available_contexts = self._build_available_contexts()
@@ -158,7 +163,9 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                             out_text = str(out[0])
                         else:
                             out_text = str(out) if out is not None else ''
-                        fs_blocks.append(f"[範例{i}]\n護理人員: {ui}\n病患: {out_text}")
+                        fs_blocks.append(
+                            f"• 參考{i} 護理人員：{ui}\n• 參考{i} 病患：{out_text}"
+                        )
                     if fs_blocks:
                         fewshot_text = "\n".join(fs_blocks) + "\n"
                         formatted_history = fewshot_text + formatted_history
@@ -497,31 +504,49 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             important = conversation_history[:2]
             recent = conversation_history[-(max_history - len(important)) :]
             combined = important + recent
-            seen = set()
+            seen_raw = set()
             trimmed = []
             for item in combined:
-                if item not in seen:
+                if item not in seen_raw:
                     trimmed.append(item)
-                    seen.add(item)
+                    seen_raw.add(item)
 
         summary_lines: List[str] = []
         seen_bullets: set[str] = set()
+        descriptors = {
+            '頭暈': '頭暈仍在，站立時較明顯',
+            '巡房': '關注醫師巡房及治療安排',
+            '治療': '期待了解後續治療計畫',
+        }
+
         for entry in trimmed[-max_history:]:
             if not entry:
                 continue
             text = entry.strip()
             if not text:
                 continue
+            bullet = None
             if ':' in text:
                 speaker, content = text.split(':', 1)
-                bullet = f"- {speaker.strip()}: {content.strip()}"
+                speaker = speaker.strip()
+                content = content.strip()
+                if speaker.startswith('護理人員'):
+                    bullet = f"• 護理人員：{content}"
+                else:
+                    bullet = f"• 病患：{content}"
             else:
-                bullet = f"- {text}"
-            if bullet in seen_bullets:
-                continue
-            seen_bullets.add(bullet)
-            summary_lines.append(bullet)
+                bullet = f"• {text}"
 
+            if bullet and bullet not in seen_bullets:
+                seen_bullets.add(bullet)
+                summary_lines.append(bullet)
+
+            for keyword, desc in descriptors.items():
+                if keyword in text and f"• 病患：{desc}" not in seen_bullets:
+                    summary_lines.append(f"• 病患：{desc}")
+                    seen_bullets.add(f"• 病患：{desc}")
+
+        summary_lines.append("• 設定：住院期間由醫護人員照護，家人僅探視。")
         formatted = "\n".join(summary_lines)
         logger.info(
             f"🔧 History management: {len(conversation_history)} entries processed for {character_name}"
