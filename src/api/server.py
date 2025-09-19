@@ -71,6 +71,7 @@ from ..core.character import Character
 from ..core.state import DialogueState
 from ..utils.speech_input import SpeechInput
 from ..core.dspy.config import DSPyConfig
+from ..llm.dspy_gemini_adapter import start_dspy_debug_log
 from .performance_monitor import get_performance_monitor
 from .health_monitor import get_health_monitor
 
@@ -689,6 +690,9 @@ def create_dialogue_manager_with_monitoring(character: Character, log_dir: str =
         (DialogueManager 實例, 實現版本字符串)
     """
     logger.debug(f"創建對話管理器，角色: {character.name}, 類型: {type(character)}")
+    log_path = start_dspy_debug_log(tag=character.name)
+    if log_path:
+        logger.info(f"已建立新的 DSPy 除錯日誌: {log_path}")
     try:
         # 使用工廠函數創建對話管理器
         manager = create_dialogue_manager(character, use_terminal=False, log_dir=log_dir)
@@ -762,6 +766,19 @@ async def get_error_summary(hours: int = 24):
     except Exception as e:
         logger.error(f"獲取錯誤摘要失敗: {e}")
         raise HTTPException(status_code=500, detail=f"錯誤摘要獲取失敗: {str(e)}")
+
+
+@app.post("/api/debug/start-log")
+async def start_dspy_debug_log_api(tag: Optional[str] = None):
+    """Start a new DSPy debug log file and return the path."""
+    path = start_dspy_debug_log(tag=tag)
+    if path is None:
+        raise HTTPException(status_code=500, detail="無法重新建立 DSPy 除錯日誌檔案")
+
+    return {
+        "status": "success",
+        "log_path": str(path)
+    }
 
 @app.post("/api/monitor/reset")
 async def reset_performance_stats():

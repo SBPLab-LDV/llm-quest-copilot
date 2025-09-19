@@ -29,25 +29,44 @@ class DSPyResponse:
 
 logger = logging.getLogger(__name__)
 
-# Ensure a dedicated debug log file exists for prompt/response inspection
-try:
-    debug_log_dir = Path("logs") / "debug"
-    debug_log_dir.mkdir(parents=True, exist_ok=True)
-    debug_log_path = debug_log_dir / f"dspy_internal_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+_DEBUG_LOG_DIR = Path("logs") / "debug"
+_DEBUG_LOG_HANDLER: Optional[logging.FileHandler] = None
 
-    _has_dspy_file_handler = any(
-        isinstance(h, logging.FileHandler) and 'dspy_internal_debug_' in getattr(h, 'baseFilename', '')
-        for h in logger.handlers
-    )
-    if not _has_dspy_file_handler:
-        _fh = logging.FileHandler(debug_log_path, mode='a', encoding='utf-8')
-        _fh.setLevel(logging.INFO)
-        _fh.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-        logger.addHandler(_fh)
-        logger.info("Gemini debug log file initialised at %s", debug_log_path)
-except Exception:
-    # Do not block if file handler cannot be configured
-    pass
+
+def start_dspy_debug_log(tag: Optional[str] = None) -> Optional[Path]:
+    """Create a standalone debug log file for the current DSPy run."""
+    global _DEBUG_LOG_HANDLER
+
+    try:
+        _DEBUG_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        tag_suffix = ""
+        if tag:
+            safe_tag = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in tag)
+            if safe_tag:
+                tag_suffix = f"_{safe_tag}"
+
+        debug_log_path = _DEBUG_LOG_DIR / f"{timestamp}{tag_suffix}_dspy_internal_debug.log"
+
+        handler = logging.FileHandler(debug_log_path, mode='w', encoding='utf-8')
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+        if _DEBUG_LOG_HANDLER:
+            logger.removeHandler(_DEBUG_LOG_HANDLER)
+            try:
+                _DEBUG_LOG_HANDLER.close()
+            except Exception:
+                logger.warning("Failed to close previous DSPy debug log handler", exc_info=True)
+
+        _DEBUG_LOG_HANDLER = handler
+        logger.addHandler(handler)
+        logger.info("DSPy debug log started at %s", debug_log_path)
+        return debug_log_path
+
+    except Exception as exc:
+        logger.warning("Unable to start DSPy debug log: %s", exc, exc_info=True)
+        return None
 
 class DSPyGeminiLM(dspy.LM):
     """DSPy Gemini Language Model 適配器
