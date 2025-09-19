@@ -72,6 +72,7 @@ class DSPyConfig:
                 'top_k': 40,
                 'max_output_tokens': 2048,
                 'use_unified_module': False,  # 統一對話模組優化
+                'enable_sensitive_rewrite': True,
                 'ollama': {
                     'base_url': 'http://127.0.0.1:11434',
                     'model': 'gpt-oss:20b',

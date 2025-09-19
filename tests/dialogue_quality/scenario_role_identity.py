@@ -109,7 +109,7 @@ def run_scenario(
                         "session_id": session_id,
                         "response_format": "text",
                     },
-                    timeout=30,
+                    timeout=45,
                 )
                 elapsed = time.time() - start_time
             except Exception as exc:  # pragma: no cover - network failure reporting

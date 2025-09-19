@@ -15,6 +15,7 @@ from ..dialogue import DialogueManager
 from ..character import Character
 from .unified_dialogue_module import UnifiedDSPyDialogueModule
 from .sensitive_question_module import SensitiveQuestionRewriteModule
+from .config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +43,20 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
         self.logger = logging.getLogger(__name__)
         self.logger.info("OptimizedDialogueManagerDSPy.__init__ - 使用統一對話模組")
         
+        # 讀取敏感提問改寫開關
+        dspy_config = get_config().get_dspy_config()
+        self.enable_sensitive_rewrite = dspy_config.get('enable_sensitive_rewrite', True)
+
         # 初始化優化的 DSPy 組件
         try:
             self.dialogue_module = UnifiedDSPyDialogueModule()
             self.optimization_enabled = True
             self.logger.info("優化統一對話模組初始化成功 - API 調用節省 66.7%")
-            self.sensitive_question_module = SensitiveQuestionRewriteModule()
+            if self.enable_sensitive_rewrite:
+                self.sensitive_question_module = SensitiveQuestionRewriteModule()
+            else:
+                self.sensitive_question_module = None
+                self.logger.info("敏感提問改寫已停用（enable_sensitive_rewrite=False）")
         except Exception as e:
             self.logger.error(f"統一對話模組初始化失敗: {e}")
             self.optimization_enabled = False
@@ -55,7 +64,14 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             from .dialogue_manager_dspy import DialogueManagerDSPy
             fallback_manager = DialogueManagerDSPy(character, use_terminal, log_dir)
             self.dialogue_module = fallback_manager.dialogue_module
-            self.sensitive_question_module = getattr(fallback_manager, 'sensitive_question_module', SensitiveQuestionRewriteModule())
+            if self.enable_sensitive_rewrite:
+                self.sensitive_question_module = getattr(
+                    fallback_manager,
+                    'sensitive_question_module',
+                    SensitiveQuestionRewriteModule(),
+                )
+            else:
+                self.sensitive_question_module = None
             self.logger.warning("已回退到原始 DSPy 實現")
         
         # 統計追蹤
@@ -479,6 +495,9 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
     def _attempt_sensitive_rewrite(self, original_question: str, base_prediction=None):
         """Ask Gemini to rewrite the question and fetch a new response."""
         try:
+            if not self.enable_sensitive_rewrite:
+                return None
+
             if not hasattr(self, 'sensitive_question_module'):
                 return None
 
