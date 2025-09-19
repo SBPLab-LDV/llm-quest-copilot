@@ -9,6 +9,7 @@ import logging
 from typing import Dict, Any, Optional, List
 from .config import get_config
 from ...llm.dspy_gemini_adapter import DSPyGeminiLM
+from ...llm.dspy_ollama_adapter import DSPyOllamaLM
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +52,15 @@ class DSPyManager:
             model_config = config.get_model_config()
             if config_override and 'model_config' in config_override:
                 model_config.update(config_override['model_config'])
-            
-            self._lm_instance = DSPyGeminiLM(**model_config)
-            logger.info(f"創建 DSPy Gemini LM: {model_config}")
+
+            provider = model_config.pop('provider', 'gemini').lower()
+
+            if provider == 'ollama':
+                self._lm_instance = DSPyOllamaLM(**model_config)
+                logger.info("創建 DSPy Ollama LM: %s", model_config)
+            else:
+                self._lm_instance = DSPyGeminiLM(**model_config)
+                logger.info("創建 DSPy Gemini LM: %s", model_config)
             
             # 配置 DSPy 全局設置
             dspy.configure(lm=self._lm_instance)

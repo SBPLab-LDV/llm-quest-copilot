@@ -63,6 +63,7 @@ class DSPyConfig:
             
             # 設置默認值
             defaults = {
+                'provider': 'gemini',
                 'enabled': False,
                 'optimize': False,
                 'model': 'gemini-2.0-flash-exp',
@@ -71,6 +72,11 @@ class DSPyConfig:
                 'top_k': 40,
                 'max_output_tokens': 2048,
                 'use_unified_module': False,  # 統一對話模組優化
+                'ollama': {
+                    'base_url': 'http://127.0.0.1:11434',
+                    'model': 'gpt-oss:20b',
+                    'timeout': 120
+                },
                 'ab_testing': {
                     'enabled': False,
                     'percentage': 50
@@ -123,13 +129,28 @@ class DSPyConfig:
             模型配置字典
         """
         dspy_config = self.get_dspy_config()
-        return {
+        provider = dspy_config.get('provider', 'gemini').lower()
+
+        model_config: Dict[str, Any] = {
+            'provider': provider,
             'model': dspy_config.get('model', 'gemini-2.0-flash-exp'),
             'temperature': dspy_config.get('temperature', 0.9),
             'top_p': dspy_config.get('top_p', 0.8),
             'top_k': dspy_config.get('top_k', 40),
             'max_output_tokens': dspy_config.get('max_output_tokens', 2048)
         }
+
+        if provider == 'ollama':
+            ollama_cfg = dspy_config.get('ollama', {})
+            model_config.update(
+                {
+                    'model': ollama_cfg.get('model', model_config['model']),
+                    'base_url': ollama_cfg.get('base_url', 'http://127.0.0.1:11434'),
+                    'timeout': ollama_cfg.get('timeout', 120),
+                }
+            )
+
+        return model_config
     
     def get_ab_testing_config(self) -> Dict[str, Any]:
         """獲取 A/B 測試配置

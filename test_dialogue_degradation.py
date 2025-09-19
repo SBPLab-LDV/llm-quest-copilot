@@ -68,7 +68,7 @@ def test_dialogue_degradation(recorder: Optional[TranscriptRecorder] = None) -> 
                     "session_id": session_id,
                     "response_format": "text"
                 },
-                timeout=30
+                timeout=120
             )
             end_time = time.time()
             response_time = end_time - start_time
@@ -294,7 +294,7 @@ def test_same_input_degradation(recorder: Optional[TranscriptRecorder] = None) -
                     "session_id": session_id,
                     "response_format": "text"
                 },
-                timeout=30
+                timeout=120
             )
             
             if response.status_code == 200:
