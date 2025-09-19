@@ -8,6 +8,7 @@
 
 import json
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional, Union
 
@@ -80,7 +81,8 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             'api_calls_saved': 0,
             'estimated_quota_saved_percent': 0.0
         }
-    
+        self._character_profile_emitted = False
+
     async def process_turn(self, user_input: str, gui_selected_response: Optional[str] = None) -> Union[str, dict]:
         """處理優化版對話輪次
         
@@ -248,7 +250,13 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             ]
             summary_parts.extend(part for part in fallback if part)
 
-        return " | ".join(summary_parts)
+        summary = " | ".join(summary_parts)
+
+        if not self._character_profile_emitted:
+            self._character_profile_emitted = True
+            return summary
+
+        return ""
     
     def _process_optimized_prediction(self, prediction) -> dict:
         """處理優化版預測結果"""
@@ -325,6 +333,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                     normalized_list.append(str(item))
 
             responses = normalized_list[:5]
+            responses = self._filter_chinese_responses(responses)
 
             return {
                 "responses": responses,
@@ -588,6 +597,18 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                     return None
             return stripped
         return None
+
+    def _filter_chinese_responses(self, responses: List[str]) -> List[str]:
+        chinese_regex = re.compile(r"[\u4e00-\u9fff]")
+        filtered: List[str] = [r for r in responses if chinese_regex.search(r)]
+        if filtered:
+            if len(filtered) < len(responses):
+                self.logger.info(
+                    "⚠️ Removed non-Chinese responses: %s",
+                    [r for r in responses if r not in filtered],
+                )
+            return filtered[:5]
+        return responses
 
     def _attempt_sensitive_rewrite(self, original_question: str, base_prediction=None):
         """Ask Gemini to rewrite the question and fetch a new response."""

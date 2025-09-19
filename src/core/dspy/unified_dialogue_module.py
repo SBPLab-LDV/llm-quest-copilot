@@ -20,13 +20,14 @@ logger = logging.getLogger(__name__)
 JSON_OUTPUT_DIRECTIVE = (
     "[指示] 僅輸出單一 JSON 物件，欄位依序為 "
     "reasoning, character_consistency_check, context_classification, confidence, "
-    "responses, state, dialogue_context, state_reasoning；responses 必須是 5 個短句字串的陣列。"
-    "禁止使用 [[ ## field ## ]]、markdown 標記或任何額外文字，且所有鍵與值都需使用雙引號。"
+    "responses, state, dialogue_context, state_reasoning；responses 必須是 5 個短句字串的陣列，"
+    "所有回應必須使用繁體中文，且不得向護理人員反問。禁止使用 [[ ## field ## ]]、markdown 標記或任何額外文字，"
+    "且所有鍵與值都需使用雙引號。"
 )
 
 PERSONA_REMINDER_TEMPLATE = (
     "[角色提醒] 您是 {name}，{persona}。確保與上方醫療事實一致，" 
-    "不得自我介紹或自稱 AI。"
+    "不得自我介紹或自稱 AI，所有回應需使用繁體中文。"
 )
 
 DEFAULT_CONTEXT_PRIORITY = [
@@ -82,6 +83,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
 
         # 追蹤最近一次模型輸出情境，做為下輪提示濾器
         self._last_context_label: Optional[str] = None
+        self._fewshot_used = False
 
         # 一致性檢查（Phase 0/1）：預設開啟，可由 config 覆寫
         self.consistency_checker = DialogueConsistencyChecker()
@@ -143,7 +145,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             # 可選：插入 few-shot 範例（k=2），強化冷啟/語境不足回合
             fewshot_text = ""
             try:
-                enable_fewshot = len(conversation_history or []) < 2
+                enable_fewshot = (not self._fewshot_used) and len(conversation_history or []) < 2
                 if enable_fewshot and hasattr(self, 'example_selector'):
                     fewshots = self.example_selector.select_examples(
                         query=user_input, context=None, k=2, strategy="hybrid"
@@ -161,6 +163,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                         fewshot_text = "\n".join(fs_blocks) + "\n"
                         formatted_history = fewshot_text + formatted_history
                         logger.info(f"🧩 Injected few-shot examples: {len(fs_blocks)}")
+                        self._fewshot_used = True
             except Exception as _e:
                 logger.info(f"Few-shot injection skipped: {_e}")
             
@@ -500,8 +503,26 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 if item not in seen:
                     trimmed.append(item)
                     seen.add(item)
-        
-        formatted = "\n".join(trimmed[-max_history:])
+
+        summary_lines: List[str] = []
+        seen_bullets: set[str] = set()
+        for entry in trimmed[-max_history:]:
+            if not entry:
+                continue
+            text = entry.strip()
+            if not text:
+                continue
+            if ':' in text:
+                speaker, content = text.split(':', 1)
+                bullet = f"- {speaker.strip()}: {content.strip()}"
+            else:
+                bullet = f"- {text}"
+            if bullet in seen_bullets:
+                continue
+            seen_bullets.add(bullet)
+            summary_lines.append(bullet)
+
+        formatted = "\n".join(summary_lines)
         logger.info(
             f"🔧 History management: {len(conversation_history)} entries processed for {character_name}"
         )
