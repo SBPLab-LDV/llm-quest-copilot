@@ -334,7 +334,6 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
 
             responses = normalized_list[:5]
             responses = self._filter_chinese_responses(responses)
-            responses = self._enforce_response_constraints(responses)
 
             return {
                 "responses": responses,
@@ -610,28 +609,6 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 )
             return filtered[:5]
         return responses
-
-    def _enforce_response_constraints(self, responses: List[str]) -> List[str]:
-        sanitized: List[str] = []
-        for response in responses:
-            candidate = response.strip()
-            if not candidate:
-                continue
-            if '?' in candidate or '？' in candidate:
-                self.logger.info(f"⚠️ Removed question response: {candidate}")
-                continue
-            if '一起住院' in candidate or '跟家人' in candidate or '跟父母' in candidate or '跟丈夫' in candidate or '跟朋友' in candidate or '跟兄弟姐妹' in candidate:
-                replacement = "我一個人住院，目前由護理團隊照護。"
-                if replacement not in sanitized:
-                    sanitized.append(replacement)
-                self.logger.info(f"⚠️ Replaced companion statement: {candidate} -> {replacement}")
-                continue
-            sanitized.append(candidate)
-
-        if not sanitized:
-            sanitized = ["我在醫院接受治療，會依照醫護指示配合。"]
-
-        return sanitized[:5]
 
     def _attempt_sensitive_rewrite(self, original_question: str, base_prediction=None):
         """Ask Gemini to rewrite the question and fetch a new response."""
