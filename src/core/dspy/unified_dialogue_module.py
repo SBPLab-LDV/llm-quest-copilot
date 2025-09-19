@@ -17,60 +17,48 @@ from .consistency_checker import DialogueConsistencyChecker
 
 logger = logging.getLogger(__name__)
 
+JSON_OUTPUT_DIRECTIVE = (
+    "[指示] 僅輸出單一 JSON 物件，欄位依序為 "
+    "reasoning, character_consistency_check, context_classification, confidence, "
+    "responses, state, dialogue_context, state_reasoning；responses 必須是 5 個短句字串的陣列。"
+    "禁止使用 [[ ## field ## ]]、markdown 標記或任何額外文字，且所有鍵與值都需使用雙引號。"
+)
+
+PERSONA_REMINDER_TEMPLATE = (
+    "[角色提醒] 您是 {name}，{persona}。確保與上方醫療事實一致，" 
+    "不得自我介紹或自稱 AI。"
+)
+
+DEFAULT_CONTEXT_PRIORITY = [
+    "daily_routine_examples",
+    "treatment_examples",
+    "vital_signs_examples",
+]
+
 
 class UnifiedPatientResponseSignature(dspy.Signature):
-    """統一的病患回應生成簽名 - JSON 輸出版本
-    
-    將情境分類、回應生成、狀態判斷合併為單一調用，
-    減少 API 使用次數從 3 次降至 1 次。
-    
-    【輸出格式要求 - 重要】
-    - 僅輸出「單一有效 JSON 物件」，不允許任何額外文字或 markdown 代碼塊（如 ``` 或 ```json）。
-    - 必須包含且只包含以下鍵（鍵名需精確匹配）：
-      reasoning, character_consistency_check, context_classification, confidence,
-      responses, state, dialogue_context, state_reasoning。
-    - responses 必須是字串陣列（5 個不同、自然的句子）。
-    - confidence 使用字串型態的數值（如 "0.90"，範圍 0.80–0.98）。
-    - state 僅在「完全無法辨識或毫無語義」時才可為 CONFUSED；一般情況請輸出 NORMAL。
-    - 若生成過程中發現缺少任何必填鍵或格式錯誤，請自行修正並重新輸出完整 JSON（不要輸出中間稿）。
-    
-    【正確 JSON 範例】
-    {
-      "reasoning": "詳細推理過程...",
-      "character_consistency_check": "YES",
-      "context_classification": "daily_routine_examples",
-      "confidence": "0.90",
-      "responses": ["回應1", "回應2", "回應3", "回應4", "回應5"],
-      "state": "NORMAL",
-      "dialogue_context": "病房日常對話",
-      "state_reasoning": "選擇 NORMAL 的原因說明"
-    }
-    
-    【禁止事項】
-    - 不要輸出 field header（如 [[ ## field ## ]]）。
-    - 不要輸出任何多餘的說明或標記（僅允許 JSON 物件）。
-    - 不要使用單引號包裹鍵或值（必須是雙引號）。
-    """
-    
-    # 輸入欄位 - 護理人員和對話相關信息
-    user_input = dspy.InputField(desc="護理人員的輸入或問題")
-    character_name = dspy.InputField(desc="病患角色的名稱")
-    character_persona = dspy.InputField(desc="病患的個性描述")
-    character_backstory = dspy.InputField(desc="病患的背景故事")
-    character_goal = dspy.InputField(desc="病患的目標")
-    character_details = dspy.InputField(desc="病患的詳細設定，包含固定和浮動設定的YAML格式字符串")
-    conversation_history = dspy.InputField(desc="最近的對話歷史，以換行分隔，包含角色一致性提醒")
-    available_contexts = dspy.InputField(desc="可用的對話情境列表")
-    
-    # 輸出欄位 - 統一的回應結果  
-    reasoning = dspy.OutputField(desc="推理過程：包含情境分析、角色一致性檢查、回應思考和狀態評估。必須確認不會進行自我介紹。【重要】邏輯一致性檢查：1) 仔細檢視對話歷史中的所有事實陳述（症狀、時間、治療狀況等）；2) 確認新回應不會與之前提到的任何醫療事實產生矛盾；3) 特別注意症狀描述、疼痛程度、發燒狀況、服藥情形等細節的前後一致性；4) 如發現潛在矛盾，必須調整回應以維持邏輯一致性；5) 明確說明檢查結果和調整內容。")
-    character_consistency_check = dspy.OutputField(desc="角色一致性檢查：確認回應符合已建立的角色人格，不包含自我介紹。回答 YES 或 NO")
-    context_classification = dspy.OutputField(desc="對話情境分類：vital_signs_examples, daily_routine_examples, treatment_examples 等")
-    confidence = dspy.OutputField(desc="情境分類的信心度，0.0到1.0之間")
-    responses = dspy.OutputField(desc="5個不同的病患回應選項，每個都應該是完整的句子，格式為字串陣列。以已建立的病患角色身份自然回應，避免自我介紹。【格式要求】必須是有效的字串陣列格式，例如：[\"回應1\", \"回應2\", \"回應3\", \"回應4\", \"回應5\"]")
-    state = dspy.OutputField(desc="對話狀態：必須是 NORMAL、CONFUSED、TRANSITIONING 或 TERMINATED 其中之一。只有在真正無法理解時才使用 CONFUSED")
-    dialogue_context = dspy.OutputField(desc="當前對話情境描述，如：醫師查房、病房日常、生命徵象相關、身體評估等。保持具體的醫療情境描述")
-    state_reasoning = dspy.OutputField(desc="狀態判斷的理由說明，解釋為什麼選擇此狀態")
+    """統一的病患回應生成簽名（精簡提示）。"""
+
+    # 輸入欄位
+    user_input = dspy.InputField(desc="護理人員問題")
+    character_name = dspy.InputField(desc="病患姓名")
+    character_persona = dspy.InputField(desc="病患性格")
+    character_backstory = dspy.InputField(desc="病患背景")
+    character_goal = dspy.InputField(desc="病患目標")
+    character_details = dspy.InputField(desc="關鍵病情資訊")
+    conversation_history = dspy.InputField(desc="近期對話與提醒")
+    available_contexts = dspy.InputField(desc="候選情境")
+
+    # 輸出欄位
+    reasoning = dspy.OutputField(desc="推理與一致性檢查")
+    character_consistency_check = dspy.OutputField(desc="角色一致性 YES/NO")
+    context_classification = dspy.OutputField(desc="情境分類 ID")
+    confidence = dspy.OutputField(desc="情境信心 0-1")
+    responses = dspy.OutputField(desc="五個病患回應")
+    state = dspy.OutputField(desc="對話狀態")
+    dialogue_context = dspy.OutputField(desc="情境描述")
+    state_reasoning = dspy.OutputField(desc="狀態原因")
+
 
 
 class UnifiedDSPyDialogueModule(DSPyDialogueModule):
@@ -91,6 +79,9 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         
         # 替換為統一的對話處理器（使用預設 JSONAdapter 流程）
         self.unified_response_generator = dspy.ChainOfThought(UnifiedPatientResponseSignature)
+
+        # 追蹤最近一次模型輸出情境，做為下輪提示濾器
+        self._last_context_label: Optional[str] = None
 
         # 一致性檢查（Phase 0/1）：預設開啟，可由 config 覆寫
         self.consistency_checker = DialogueConsistencyChecker()
@@ -140,13 +131,19 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 conversation_history, character_name, character_persona
             )
             
-            # 獲取可用情境（本地處理，不調用 API）
-            available_contexts = self._get_available_contexts()
+            # 將輸出格式要求附加到提示末端
+            if formatted_history:
+                formatted_history = f"{formatted_history}\n{JSON_OUTPUT_DIRECTIVE}"
+            else:
+                formatted_history = JSON_OUTPUT_DIRECTIVE
+
+            # 獲取精簡後的可用情境清單
+            available_contexts = self._build_available_contexts()
 
             # 可選：插入 few-shot 範例（k=2），強化冷啟/語境不足回合
             fewshot_text = ""
             try:
-                enable_fewshot = True if isinstance(self.config, dict) else True
+                enable_fewshot = len(conversation_history or []) < 2
                 if enable_fewshot and hasattr(self, 'example_selector'):
                     fewshots = self.example_selector.select_examples(
                         query=user_input, context=None, k=2, strategy="hybrid"
@@ -189,11 +186,20 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             call_duration = call_end_time - call_start_time
             
             logger.info(f"✅ Call #{current_call} completed in {call_duration:.3f}s - {type(unified_prediction).__name__}")
-            
-            
+
+
             parsed_responses = self._parse_responses(unified_prediction.responses)
             logger.info(f"💬 Generated {len(parsed_responses)} responses - State: {unified_prediction.state}")
             logger.info(f"📈 API calls saved: 2 (1 vs 3 original calls)")
+
+            # 更新情境偏好，供下一輪精簡提示使用
+            try:
+                raw_context = getattr(unified_prediction, 'context_classification', None)
+                normalized_context = self._normalize_context_label(raw_context)
+                if normalized_context:
+                    self._last_context_label = normalized_context
+            except Exception:
+                pass
 
             # Detailed reasoning and fields for inspection
             try:
@@ -280,6 +286,21 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
     
     def _parse_responses(self, responses_text: Union[str, List[Any]]) -> List[str]:
         """解析回應為列表（僅用於日誌顯示）"""
+        def _extract_from_dict(data: Dict[str, Any]) -> Optional[List[str]]:
+            if not isinstance(data, dict):
+                return None
+            candidate = data.get('responses')
+            if isinstance(candidate, list):
+                return [str(x) for x in candidate[:5]]
+            if isinstance(candidate, str):
+                try:
+                    parsed = json.loads(candidate)
+                    if isinstance(parsed, list):
+                        return [str(x) for x in parsed[:5]]
+                except Exception:
+                    return [candidate]
+            return None
+
         try:
             # 已是列表
             if isinstance(responses_text, list):
@@ -296,12 +317,21 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 # 常規列表
                 return [str(x) for x in responses_text[:5]]
             
+            if isinstance(responses_text, dict):
+                extracted = _extract_from_dict(responses_text)
+                if extracted is not None:
+                    return extracted
+            
             # 原始是字串 -> 嘗試 JSON 解析
             if isinstance(responses_text, str):
                 try:
                     parsed = json.loads(responses_text)
                     if isinstance(parsed, list):
                         return [str(x) for x in parsed[:5]]
+                    if isinstance(parsed, dict):
+                        extracted = _extract_from_dict(parsed)
+                        if extracted is not None:
+                            return extracted
                 except json.JSONDecodeError:
                     # 不是 JSON，按行分割
                     lines = [line.strip() for line in responses_text.split('\n') if line.strip()]
@@ -314,6 +344,21 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
 
     # 覆蓋父類回應處理，處理特殊嵌套情況
     def _process_responses(self, responses: Union[str, List[Any]]) -> List[str]:
+        def _extract_from_dict(data: Dict[str, Any]) -> Optional[List[str]]:
+            if not isinstance(data, dict):
+                return None
+            candidate = data.get('responses')
+            if isinstance(candidate, list):
+                return [str(x) for x in candidate[:5]]
+            if isinstance(candidate, str):
+                try:
+                    parsed = json.loads(candidate)
+                    if isinstance(parsed, list):
+                        return [str(x) for x in parsed[:5]]
+                except Exception:
+                    return [candidate]
+            return None
+
         try:
             # 已是列表
             if isinstance(responses, list):
@@ -332,12 +377,21 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                     return [str(x) for x in responses[0][:5]]
                 return [str(x) for x in responses[:5]]
             
+            if isinstance(responses, dict):
+                extracted = _extract_from_dict(responses)
+                if extracted is not None:
+                    return extracted
+
             # 原始是字串 -> 嘗試 JSON 解析
             if isinstance(responses, str):
                 try:
                     parsed = json.loads(responses)
                     if isinstance(parsed, list):
                         return [str(x) for x in parsed[:5]]
+                    if isinstance(parsed, dict):
+                        extracted = _extract_from_dict(parsed)
+                        if extracted is not None:
+                            return extracted
                 except json.JSONDecodeError:
                     lines = [line.strip() for line in responses.split('\n') if line.strip()]
                     return lines[:5]
@@ -346,12 +400,79 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         except Exception as e:
             logger.error(f"回應格式處理失敗: {e}", exc_info=True)
             return [f"UnifiedResponseFormatError[{type(e).__name__}]: {e}"]
-    
-    
+
+
+    def _build_available_contexts(self) -> str:
+        """回傳最多三個高優先情境，避免提示冗長。"""
+        context_descriptions = {
+            'vital_signs_examples': '生命徵象相關',
+            'outpatient_examples': '門診醫師問診', 
+            'treatment_examples': '治療相關',
+            'physical_assessment_examples': '身體評估',
+            'wound_tube_care_examples': '傷口管路相關',
+            'rehabilitation_examples': '復健治療',
+            'doctor_visit_examples': '醫師查房',
+            'daily_routine_examples': '病房日常',
+            'examination_examples': '檢查相關',
+            'nutrition_examples': '營養相關'
+        }
+
+        prioritized: List[Any] = []
+        if self._last_context_label:
+            prioritized.append(self._last_context_label)
+        prioritized.extend(DEFAULT_CONTEXT_PRIORITY)
+
+        try:
+            if hasattr(self, 'example_selector') and self.example_selector:
+                bank_contexts = self.example_selector.example_bank.get_context_list()
+                prioritized.extend(bank_contexts)
+        except Exception:
+            pass
+
+        # 去重保序後取前三個
+        compact: List[str] = []
+        for ctx in prioritized:
+            label = self._normalize_context_label(ctx)
+            if not label:
+                continue
+            if label not in compact:
+                compact.append(label)
+            if len(compact) == 3:
+                break
+
+        if not compact:
+            compact = DEFAULT_CONTEXT_PRIORITY[:3]
+
+        return "\n".join(
+            f"- {ctx}: {context_descriptions.get(ctx, ctx)}" for ctx in compact
+        )
+
+
+    def _normalize_context_label(self, label: Any) -> Optional[str]:
+        if isinstance(label, str):
+            value = label.strip()
+            if not value:
+                return None
+            if value.startswith('{') and value.endswith('}'):
+                try:
+                    parsed = json.loads(value)
+                    return self._normalize_context_label(parsed)
+                except Exception:
+                    return None
+            return value
+        if isinstance(label, dict):
+            for key in ('context_classification', 'label', 'id', 'name', 'value'):
+                if key in label:
+                    normalized = self._normalize_context_label(label[key])
+                    if normalized:
+                        return normalized
+        return None
+
+
     def _get_enhanced_conversation_history(self, conversation_history: List[str], 
                                          character_name: str, character_persona: str) -> str:
         """獲取增強的對話歷史，保持角色一致性
-        
+
         Args:
             conversation_history: 完整對話歷史
             character_name: 角色名稱
@@ -360,38 +481,31 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         Returns:
             str: 格式化後的對話歷史
         """
+        reminder = PERSONA_REMINDER_TEMPLATE.format(name=character_name, persona=character_persona)
+
         if not conversation_history:
-            return ""
-        
-        max_history = 8  # 增加到8輪以提供更多上下文
-        
+            return reminder
+
+        max_history = 5
+
         if len(conversation_history) <= max_history:
-            formatted = "\n".join(conversation_history)
+            trimmed = list(conversation_history)
         else:
-            # 策略：保留前3輪（角色建立期）+ 最近5輪（當前對話）
-            important_start = conversation_history[:6]  # 前3輪對話（護理人員+病患各3次）
-            recent = conversation_history[-(max_history-3):]  # 最近5輪
-            
-            # 避免重複
-            if len(conversation_history) > max_history:
-                combined = important_start + recent
-                # 去除重複項（如果有）
-                seen = set()
-                unique_history = []
-                for item in combined:
-                    if item not in seen:
-                        unique_history.append(item)
-                        seen.add(item)
-                formatted = "\n".join(unique_history[-max_history:])
-            else:
-                formatted = "\n".join(conversation_history)
+            important = conversation_history[:2]
+            recent = conversation_history[-(max_history - len(important)) :]
+            combined = important + recent
+            seen = set()
+            trimmed = []
+            for item in combined:
+                if item not in seen:
+                    trimmed.append(item)
+                    seen.add(item)
         
-        # 添加角色一致性提示和邏輯一致性檢查
-        character_reminder = f"\n[重要: 您是 {character_name}，{character_persona}。保持角色一致性。【邏輯一致性檢查】請仔細檢查上述對話歷史中的醫療事實（症狀、發燒狀況、疼痛程度、服藥情況等），確保您的回應與之前提到的所有事實保持完全一致，避免任何矛盾。]"
-        
-        logger.info(f"🔧 History management: {len(conversation_history)} entries processed for {character_name}")
-        
-        return formatted + character_reminder
+        formatted = "\n".join(trimmed[-max_history:])
+        logger.info(
+            f"🔧 History management: {len(conversation_history)} entries processed for {character_name}"
+        )
+        return f"{formatted}\n{reminder}"
     
     
     

@@ -9,7 +9,7 @@
 import json
 import logging
 import time
-from typing import Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from ..dialogue import DialogueManager
 from ..character import Character
@@ -197,37 +197,70 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 return self._generate_emergency_response(user_input)
     
     def _get_character_details(self) -> str:
-        """獲取角色詳細資訊的字串表示
-        - 優先使用 Character.details 字段（dict）
-        - 兼容舊設計：若 details 缺失，嘗試拼接已存在屬性
-        """
+        """回傳簡潔的角色摘要供提示使用。"""
+        summary_parts: List[str] = []
+
+        details_dict: Optional[Dict[str, Any]] = None
         try:
             if isinstance(self.character.details, dict) and self.character.details:
-                return json.dumps(self.character.details, ensure_ascii=False)
+                details_dict = self.character.details
+            elif isinstance(self.character.details, str) and self.character.details.strip():
+                details_dict = json.loads(self.character.details)
         except Exception:
-            pass
+            details_dict = None
 
-        details = {}
-        # 回退：若 details 不可用，組裝已知屬性（通常不會進入）
-        for attr in ['fixed_settings', 'floating_settings', 'age', 'gender', 'medical_condition']:
-            if hasattr(self.character, attr):
-                try:
-                    val = getattr(self.character, attr)
-                    if isinstance(val, dict):
-                        details.update(val)
-                    else:
-                        details[attr] = val
-                except Exception:
-                    continue
-        return json.dumps(details, ensure_ascii=False) if details else "{}"
+        if details_dict:
+            fixed = details_dict.get('fixed_settings') or {}
+            floating = details_dict.get('floating_settings') or {}
+
+            name = fixed.get('姓名') or getattr(self.character, 'name', '')
+            diagnosis = fixed.get('診斷') or fixed.get('目前診斷') or ''
+            staging = fixed.get('分期') or fixed.get('診斷分期') or ''
+            summary_parts.append(
+                "姓名: {name} / 診斷: {diag}{stage}".format(
+                    name=name or getattr(self.character, 'name', '未知'),
+                    diag=diagnosis,
+                    stage=f" ({staging})" if staging else ""
+                ).strip()
+            )
+
+            treatment_stage = floating.get('目前治療階段') or floating.get('治療階段') or ''
+            treatment_status = floating.get('目前治療狀態') or ''
+            if treatment_stage or treatment_status:
+                line = "目前治療階段: {stage}".format(stage=treatment_stage or treatment_status)
+                if treatment_stage and treatment_status and treatment_status != treatment_stage:
+                    line += f"；狀態: {treatment_status}"
+                summary_parts.append(line)
+
+            caregiver = floating.get('主要照顧者') or floating.get('陪伴者')
+            if caregiver:
+                summary_parts.append(f"陪伴者: {caregiver}")
+
+            notes = floating.get('個案現況')
+            if notes and len(notes) <= 80:
+                summary_parts.append(f"現況: {notes}")
+
+        if not summary_parts:
+            fallback = [
+                f"姓名: {getattr(self.character, 'name', '未知')}",
+                getattr(self.character, 'persona', ''),
+                getattr(self.character, 'goal', ''),
+            ]
+            summary_parts.extend(part for part in fallback if part)
+
+        return " | ".join(summary_parts)
     
     def _process_optimized_prediction(self, prediction) -> dict:
         """處理優化版預測結果"""
         try:
             responses = getattr(prediction, 'responses', [])
-            state = getattr(prediction, 'state', 'NORMAL')
-            dialogue_context = getattr(prediction, 'dialogue_context', '一般對話')
-            context_classification = getattr(prediction, 'context_classification', 'daily_routine_examples')
+            state = self._normalize_state_value(getattr(prediction, 'state', 'NORMAL'))
+            dialogue_context = self._normalize_text_field(
+                getattr(prediction, 'dialogue_context', '一般對話')
+            )
+            context_classification = self._normalize_context_value(
+                getattr(prediction, 'context_classification', 'daily_routine_examples')
+            ) or 'daily_routine_examples'
             processing_info = getattr(prediction, 'processing_info', None)
             
             # 確保回應格式正確
@@ -277,6 +310,16 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                             if remainder:
                                 normalized_list.append(remainder)
                             continue
+                        if s.startswith('{') and s.endswith('}'):
+                            try:
+                                parsed_obj = json.loads(s)
+                                if isinstance(parsed_obj, dict) and 'responses' in parsed_obj:
+                                    extracted = parsed_obj['responses']
+                                    if isinstance(extracted, list):
+                                        normalized_list.extend([str(x) for x in extracted])
+                                        continue
+                            except Exception:
+                                pass
                     normalized_list.append(s)
                 else:
                     normalized_list.append(str(item))
@@ -491,6 +534,60 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
         if responses is None:
             return []
         return [str(responses).strip()]
+
+    def _normalize_state_value(self, raw_state: Any) -> str:
+        allowed = {'NORMAL', 'CONFUSED', 'TRANSITIONING', 'TERMINATED'}
+
+        if isinstance(raw_state, dict):
+            return self._normalize_state_value(raw_state.get('state') or raw_state.get('name'))
+        if isinstance(raw_state, (list, tuple)):
+            for item in raw_state:
+                normalized = self._normalize_state_value(item)
+                if normalized:
+                    return normalized
+            return 'NORMAL'
+        if raw_state is None:
+            return 'NORMAL'
+
+        candidate = str(raw_state).strip().upper()
+        if candidate in allowed:
+            return candidate
+        return 'NORMAL'
+
+    def _normalize_text_field(self, value: Any) -> str:
+        if isinstance(value, dict):
+            for key in ('dialogue_context', 'value', 'text', 'description'):
+                if key in value:
+                    return self._normalize_text_field(value[key])
+            return json.dumps(value, ensure_ascii=False)
+        if isinstance(value, (list, tuple)):
+            return " | ".join(self._normalize_text_field(v) for v in value if v)
+        return str(value).strip() if value is not None else ''
+
+    def _normalize_context_value(self, value: Any) -> Optional[str]:
+        if isinstance(value, dict):
+            for key in ('context_classification', 'label', 'id', 'name', 'value'):
+                if key in value:
+                    return self._normalize_context_value(value[key])
+            return None
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                normalized = self._normalize_context_value(item)
+                if normalized:
+                    return normalized
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            if stripped.startswith('{') and stripped.endswith('}'):
+                try:
+                    parsed = json.loads(stripped)
+                    return self._normalize_context_value(parsed)
+                except Exception:
+                    return None
+            return stripped
+        return None
 
     def _attempt_sensitive_rewrite(self, original_question: str, base_prediction=None):
         """Ask Gemini to rewrite the question and fetch a new response."""
