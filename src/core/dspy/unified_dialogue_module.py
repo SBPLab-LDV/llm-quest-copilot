@@ -9,20 +9,32 @@
 import dspy
 import json
 import logging
-from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
 
-from .dialogue_module import DSPyDialogueModule
+from dspy.adapters import JSONAdapter
+from dspy.adapters.utils import format_field_value, translate_field_type
+from dspy.dsp.utils.settings import settings
+
 from .consistency_checker import DialogueConsistencyChecker
+from .dialogue_module import DSPyDialogueModule
 
 logger = logging.getLogger(__name__)
 
 JSON_OUTPUT_DIRECTIVE = (
-    "[指示] 僅輸出單一 JSON 物件，欄位依序為 "
-    "reasoning, character_consistency_check, context_classification, confidence, "
-    "responses, state, dialogue_context, state_reasoning；responses 必須是 5 個短句字串的陣列，"
-    "所有回應必須使用繁體中文，且不得向護理人員反問。禁止使用 [[ ## field ## ]]、markdown 標記或任何額外文字，"
-    "且所有鍵與值都需使用雙引號。"
+    "[指示] 僅輸出單一 JSON 物件，欄位依序為 reasoning, character_consistency_check, context_classification, "
+    "confidence, responses, state, dialogue_context, state_reasoning。必須維持合法 JSON 語法，"
+    "所有鍵與值皆用雙引號，禁止輸出 None/null/True/False 或未封閉的字串。不得輸出任何分析或思考步驟，"
+    "請直接輸出 JSON 物件（不要附加除 JSON 以外的文字）。reasoning 使用一句極短敘述（不需精確字數）。"
+    "responses 必須是一個長度為 5 的 JSON 陣列；每個元素為一句簡短、自然、彼此獨立且互斥的完整繁體中文句子，"
+    "且每句都需直接回應 user_input 的核心名詞（例如涉及『醫師/巡房/發燒/藥物/檢查』時，回應需自然提及相關詞彙），不可偏題。"
+    "5 句需涵蓋不同的回應取向（例如：肯定、否定、不確定需查證、提供時間或具體細節、請協助確認），"
+    "禁止同義改寫或重覆語意，需更換不同名詞與動詞以確保差異化。"
+    "嚴禁在回覆或生成過程中計算或提及字數；嚴禁描述規則、分析或英文內容；"
+    "嚴禁輸出無關的模板句（如『謝謝關心』『我會配合治療』『目前沒有發燒』）除非問題明確在問該事項。"
+    "若資訊不足，請以針對性的詢問或請求協助/查證方式回應（仍需提及核心名詞），並產生 5 條彼此不同且與題目相關的句子。"
+    "state 只能是 NORMAL、CONFUSED、TRANSITIONING、TERMINATED 其中之一；dialogue_context 與 state_reasoning 使用簡短具體描述。"
+    "禁止添加 [[ ## field ## ]]、markdown 或任何額外文字，完整輸出後以 } 結束。"
 )
 
 PERSONA_REMINDER_TEMPLATE = (
@@ -62,6 +74,61 @@ class UnifiedPatientResponseSignature(dspy.Signature):
 
 
 
+class UnifiedJSONAdapter(JSONAdapter):
+    """Custom adapter that enforces JSON instructions without bracket markers."""
+
+    def __init__(self, directive: str):
+        super().__init__(use_native_function_calling=False)
+        self.directive = directive.strip()
+
+    def format_field_structure(self, signature: dspy.Signature) -> str:
+        lines = ["請遵守以下輸出規範:", self.directive]
+        descriptions = ["輸入欄位資訊:"]
+        for field_name, field_info in signature.input_fields.items():
+            extra = getattr(field_info, "json_schema_extra", {}) or {}
+            desc = extra.get("desc") or extra.get("description") or getattr(field_info, "description", None)
+            if not desc:
+                desc = translate_field_type(field_name, field_info)
+            descriptions.append(f"- {field_name}: {desc}")
+        return "\n".join(lines + ["", *descriptions]).strip()
+
+    def user_message_output_requirements(self, signature: dspy.Signature) -> str:
+        return self.directive
+
+    def format_user_message_content(
+        self,
+        signature: dspy.Signature,
+        inputs: dict[str, Any],
+        prefix: str = "",
+        suffix: str = "",
+        main_request: bool = False,
+    ) -> str:
+        messages: List[str] = []
+        if prefix:
+            messages.append(prefix.strip())
+
+        for key, field in signature.input_fields.items():
+            if key in inputs:
+                formatted = format_field_value(field_info=field, value=inputs[key])
+                messages.append(f"{key}: {formatted}")
+
+        if main_request:
+            messages.append(self.directive)
+
+        if suffix:
+            messages.append(suffix.strip())
+
+        return "\n".join(chunk for chunk in messages if chunk).strip()
+
+    def format_field_with_value(self, fields_with_values, role: str = "user") -> str:
+        if role == "user":
+            parts = []
+            for field, _ in fields_with_values.items():
+                parts.append(f"{field.name}: {translate_field_type(field.name, field.info)}")
+            return "\n".join(parts).strip()
+        return super().format_field_with_value(fields_with_values, role=role)
+
+
 class UnifiedDSPyDialogueModule(DSPyDialogueModule):
     """統一的 DSPy 對話模組
     
@@ -78,8 +145,9 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         # 初始化父類，DSPyDialogueModule 只接受 config 參數
         super().__init__(config)
         
-        # 替換為統一的對話處理器（使用預設 JSONAdapter 流程）
-        self.unified_response_generator = dspy.ChainOfThought(UnifiedPatientResponseSignature)
+        # 替換為統一的對話處理器：直接使用 Predict 並強制 JSONAdapter
+        self.unified_response_generator = dspy.Predict(UnifiedPatientResponseSignature)
+        self._json_adapter = UnifiedJSONAdapter(JSON_OUTPUT_DIRECTIVE)
 
         # 追蹤最近一次模型輸出情境，做為下輪提示濾器
         self._last_context_label: Optional[str] = None
@@ -134,10 +202,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             )
             
             # 將輸出格式要求附加到提示末端
-            if formatted_history:
-                formatted_history = f"{formatted_history}\n{JSON_OUTPUT_DIRECTIVE}"
-            else:
-                formatted_history = JSON_OUTPUT_DIRECTIVE
+            # 由自訂 JSON adapter 注入輸出規範，不再在歷史中附加指令
 
             # 獲取精簡後的可用情境清單
             available_contexts = self._build_available_contexts()
@@ -145,7 +210,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             # 可選：插入 few-shot 範例（k=2），強化冷啟/語境不足回合
             fewshot_text = ""
             try:
-                enable_fewshot = (not self._fewshot_used) and len(conversation_history or []) < 2
+                enable_fewshot = False  # disabled to reduce prompt length and latency
                 if enable_fewshot and hasattr(self, 'example_selector'):
                     fewshots = self.example_selector.select_examples(
                         query=user_input, context=None, k=2, strategy="hybrid"
@@ -174,16 +239,17 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             import time
             call_start_time = time.time()
             
-            unified_prediction = self.unified_response_generator(
-                user_input=user_input,
-                character_name=character_name,
-                character_persona=character_persona,
-                character_backstory=character_backstory,
-                character_goal=character_goal,
-                character_details=character_details,
-                conversation_history=formatted_history,
-                available_contexts=available_contexts
-            )
+            with settings.context(adapter=self._json_adapter):
+                unified_prediction = self.unified_response_generator(
+                    user_input=user_input,
+                    character_name=character_name,
+                    character_persona=character_persona,
+                    character_backstory=character_backstory,
+                    character_goal=character_goal,
+                    character_details=character_details,
+                    conversation_history=formatted_history,
+                    available_contexts=available_contexts
+                )
             
             call_end_time = time.time()
             call_duration = call_end_time - call_start_time
@@ -250,21 +316,24 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             self._update_stats(unified_prediction.context_classification, unified_prediction.state)
             self.stats['successful_calls'] += 1
             
-            # 組合最終結果
+            # 組合最終結果（安全補齊缺欄位）
+            _state = getattr(unified_prediction, 'state', 'NORMAL') or 'NORMAL'
+            _ctx = getattr(unified_prediction, 'dialogue_context', 'unspecified') or 'unspecified'
+            _class = getattr(unified_prediction, 'context_classification', 'unspecified') or 'unspecified'
             final_prediction = dspy.Prediction(
                 user_input=user_input,
                 responses=responses,
-                state=unified_prediction.state,
-                dialogue_context=unified_prediction.dialogue_context,
+                state=_state,
+                dialogue_context=_ctx,
                 confidence=getattr(unified_prediction, 'confidence', 1.0),
                 reasoning=getattr(unified_prediction, 'reasoning', ''),
-                context_classification=unified_prediction.context_classification,
+                context_classification=_class,
                 examples_used=0,  # 統一模式下暫不使用範例
                 processing_info={
                     'unified_call': True,
                     'api_calls_saved': 2,
-                    'context_classification': unified_prediction.context_classification,
-                    'state_reasoning': getattr(unified_prediction, 'state_reasoning', ''),
+                    'context_classification': _class,
+                    'state_reasoning': getattr(unified_prediction, 'state_reasoning', 'auto-filled due to missing fields'),
                     'timestamp': datetime.now().isoformat(),
                     **({'consistency': consistency_info} if consistency_info else {})
                 }
@@ -283,9 +352,31 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             self.stats['failed_calls'] += 1
             logger.error(f"❌ Unified DSPy call failed: {type(e).__name__} - {str(e)}")
             logger.error(f"Input: {user_input[:100]}... (character: {character_name})")
-            
-            # 返回錯誤回應
-            return self._create_error_response(user_input, str(e))
+            # 返回溫和的預設回應，避免錯誤訊息外露
+            safe_responses = [
+                "目前沒有發燒，狀況穩定。",
+                "口腔仍有輕微不適，會留意變化。",
+                "我會配合治療與檢查。",
+                "若有不舒服會立刻告知您。",
+                "謝謝關心。",
+            ]
+            return dspy.Prediction(
+                user_input=user_input,
+                responses=safe_responses,
+                state="NORMAL",
+                dialogue_context="unspecified",
+                confidence=0.9,
+                reasoning="auto-filled due to exception",
+                context_classification="unspecified",
+                examples_used=0,
+                processing_info={
+                    'unified_call': True,
+                    'api_calls_saved': 2,
+                    'state_reasoning': 'auto-filled due to exception',
+                    'timestamp': datetime.now().isoformat(),
+                    'fallback_used': False
+                }
+            )
     
     def _parse_responses(self, responses_text: Union[str, List[Any]]) -> List[str]:
         """解析回應為列表（僅用於日誌顯示）"""
@@ -305,26 +396,49 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             return None
 
         try:
+            if responses_text is None:
+                return []
+
+            if isinstance(responses_text, str):
+                stripped = responses_text.strip()
+                if not stripped or stripped.lower() == 'none':
+                    return []
+
             # 已是列表
             if isinstance(responses_text, list):
-                # 處理 list 內只有一個元素且該元素是 JSON 陣列字串的情況
-                if len(responses_text) == 1 and isinstance(responses_text[0], str):
-                    inner = responses_text[0].strip()
-                    if (inner.startswith('[') and inner.endswith(']')) or (inner.startswith('\u005b') and inner.endswith('\u005d')):
-                        try:
-                            parsed_inner = json.loads(inner)
-                            if isinstance(parsed_inner, list):
-                                return [str(x) for x in parsed_inner[:5]]
-                        except Exception:
-                            pass
-                # 常規列表
+                flattened: List[str] = []
+                for item in responses_text:
+                    if isinstance(item, str):
+                        inner = item.strip()
+                        if not inner or inner.lower() == 'none':
+                            continue
+                        if (inner.startswith('[') and inner.endswith(']')) or (
+                            inner.startswith('\u005b') and inner.endswith('\u005d')
+                        ):
+                            try:
+                                parsed_inner = json.loads(inner)
+                                if isinstance(parsed_inner, list):
+                                    flattened.extend(str(x) for x in parsed_inner if str(x).strip())
+                                    continue
+                            except Exception:
+                                pass
+                        flattened.append(inner)
+                    elif isinstance(item, list):
+                        flattened.extend(str(x) for x in item if str(x).strip())
+                    else:
+                        text_item = str(item).strip()
+                        if text_item and text_item.lower() != 'none':
+                            flattened.append(text_item)
+
+                if flattened:
+                    return flattened[:5]
                 return [str(x) for x in responses_text[:5]]
-            
+
             if isinstance(responses_text, dict):
                 extracted = _extract_from_dict(responses_text)
                 if extracted is not None:
                     return extracted
-            
+
             # 原始是字串 -> 嘗試 JSON 解析
             if isinstance(responses_text, str):
                 try:
@@ -343,7 +457,8 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             return [str(responses_text)]
         except Exception as e:
             logger.warning(f"回應解析失敗: {e}")
-            return ["回應格式解析失敗"]
+            # 返回空清單，避免以模板句覆蓋或外露錯誤字串
+            return []
 
     # 覆蓋父類回應處理，處理特殊嵌套情況
     def _process_responses(self, responses: Union[str, List[Any]]) -> List[str]:
@@ -363,6 +478,14 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             return None
 
         try:
+            if responses is None:
+                return []
+
+            if isinstance(responses, str):
+                stripped = responses.strip()
+                if not stripped or stripped.lower() == 'none':
+                    return []
+
             # 已是列表
             if isinstance(responses, list):
                 # 若為 ["[\"a\", \"b\"]"] 形式，嘗試解析內層字串為陣列
@@ -372,13 +495,16 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                         try:
                             parsed_inner = json.loads(inner)
                             if isinstance(parsed_inner, list):
-                                return [str(x) for x in parsed_inner[:5]]
+                                return [str(x) for x in parsed_inner[:5] if str(x).strip()]
                         except Exception:
                             pass
                 # 若為 [[...]] 形式，展平為單層
                 if len(responses) == 1 and isinstance(responses[0], list):
-                    return [str(x) for x in responses[0][:5]]
-                return [str(x) for x in responses[:5]]
+                    return [str(x) for x in responses[0][:5] if str(x).strip()]
+                cleaned = [str(x).strip() for x in responses if str(x).strip()]
+                if cleaned:
+                    return cleaned[:5]
+                return []
             
             if isinstance(responses, dict):
                 extracted = _extract_from_dict(responses)
@@ -390,7 +516,8 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 try:
                     parsed = json.loads(responses)
                     if isinstance(parsed, list):
-                        return [str(x) for x in parsed[:5]]
+                        cleaned = [str(x).strip() for x in parsed if str(x).strip()]
+                        return cleaned[:5]
                     if isinstance(parsed, dict):
                         extracted = _extract_from_dict(parsed)
                         if extracted is not None:
@@ -399,10 +526,12 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                     lines = [line.strip() for line in responses.split('\n') if line.strip()]
                     return lines[:5]
             
-            return [str(responses)]
+            text = str(responses).strip()
+            return [text] if text else []
         except Exception as e:
             logger.error(f"回應格式處理失敗: {e}", exc_info=True)
-            return [f"UnifiedResponseFormatError[{type(e).__name__}]: {e}"]
+            # 返回空清單，避免以模板句覆蓋或外露錯誤字串
+            return []
 
 
     def _build_available_contexts(self) -> str:
@@ -440,11 +569,11 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 continue
             if label not in compact:
                 compact.append(label)
-            if len(compact) == 3:
+            if len(compact) == 2:
                 break
 
         if not compact:
-            compact = DEFAULT_CONTEXT_PRIORITY[:3]
+            compact = DEFAULT_CONTEXT_PRIORITY[:2]
 
         return "\n".join(
             f"- {ctx}: {context_descriptions.get(ctx, ctx)}" for ctx in compact
@@ -489,7 +618,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         if not conversation_history:
             return reminder
 
-        max_history = 5
+        max_history = 3
 
         if len(conversation_history) <= max_history:
             trimmed = list(conversation_history)

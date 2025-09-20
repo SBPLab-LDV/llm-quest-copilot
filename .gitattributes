@@ -1,2 +1,2 @@
-logs/dialogue_quality/*.log filter=lfs diff=lfs merge=lfs -text
-logs/**/*.log filter=lfs diff=lfs merge=lfs -text
+# Track all files under logs/ with Git LFS per project policy
+logs/** filter=lfs diff=lfs merge=lfs -text

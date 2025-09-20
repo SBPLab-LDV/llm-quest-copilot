@@ -135,7 +135,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             self.logger.info(f"  - API 調用次數: 1 (原本需要 3次)")
             self.logger.info(f"  - 節省配額使用: 66.7%")
             self.logger.info(f"  - 回應數量: {len(prediction.responses)}")
-            self.logger.info(f"  - 情境分類: {prediction.context_classification}")
+            self.logger.info(f"  - 情境分類: {getattr(prediction, 'context_classification', None)}")
             
             # 更新節省統計
             saved_calls = prediction.processing_info.get('api_calls_saved', 2)
@@ -835,6 +835,20 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             any(term in str(response) for term in medical_terms)
             for response in responses
         )
+
+    def _has_self_introduction(self, response_data: dict) -> bool:
+        """檢查是否包含自我介紹樣式，避免模板化開頭。
+
+        極簡偵測：只要任一回應包含常見自介片語即算命中。
+        """
+        patterns = [
+            "我是", "我叫", "我的名字", "姓名是", "您好，我是", "抱歉，我是", "Patient_",
+        ]
+        try:
+            responses = response_data.get("responses", []) or []
+            return any(any(p in str(r) for p in patterns) for r in responses)
+        except Exception:
+            return False
     
     def _calculate_response_diversity(self, responses: list) -> float:
         """計算回應多樣性分數"""

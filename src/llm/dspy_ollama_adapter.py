@@ -53,6 +53,8 @@ class DSPyOllamaLM(BaseDSPyLM):
             "top_p": top_p,
             "top_k": top_k,
             "num_predict": max_output_tokens,
+            # Try to limit externalized chain-of-thought usage if model supports it
+            "reasoning": {"effort": "low"},
         }
         # Merge and drop None values
         merged_options = {
@@ -113,17 +115,11 @@ class DSPyOllamaLM(BaseDSPyLM):
                 logger.info("清理後完整內容: %s", cleaned)
                 response = cleaned
 
-            # 如果回應以 { 開始且以 } 結束，直接返回（不做額外處理）
-            if response.startswith('{') and response.endswith('}'):
-                # 移除 JSON 中的多餘換行符，保持為單行
-                try:
-                    obj = json.loads(response)
-                    response = json.dumps(obj, ensure_ascii=False)
-                    logger.info("✅ 返回格式化的 JSON: %s", response)
-                except json.JSONDecodeError:
-                    logger.warning("JSON 解析失敗，返回原始回應")
-
-            return response
+            # 正規化 JSON，補齊缺失欄位並限制 responses 最多 5 條
+            normalized = self._normalize_json_response(response)
+            if normalized != response:
+                logger.info("🔧 已正規化 JSON 輸出（補齊缺失欄位/格式化）")
+            return normalized
 
         except Exception as exc:
             self.error_count += 1
