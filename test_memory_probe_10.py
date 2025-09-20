@@ -9,13 +9,22 @@ T3 plants an anchor fact; T10 asks to recall it. We run twice:
 import os
 import json
 import time
+import random
 from typing import Optional, Dict, Any, List
 
 import requests
 
+try:
+    # Reuse the shared system testing personas
+    from src.ui.client import system_testing_config
+except Exception:
+    system_testing_config = None  # type: ignore
+
 
 BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
-CHARACTER_ID = os.environ.get("CHARACTER_ID", "1")
+AVAILABLE_IDS = ["1", "2", "3", "4", "5", "6"]
+CHARACTER_ID = os.environ.get("CHARACTER_ID") or random.choice(AVAILABLE_IDS)
+CHARACTER_CONFIG = system_testing_config(CHARACTER_ID) if system_testing_config else None
 
 
 def set_max_history(n: int) -> None:
@@ -30,6 +39,7 @@ def post_text(text: str, session_id: Optional[str]) -> Dict[str, Any]:
         "character_id": CHARACTER_ID,
         "session_id": session_id,
         "response_format": "text",
+        "character_config": CHARACTER_CONFIG,
     }
     r = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=120)
     r.raise_for_status()
