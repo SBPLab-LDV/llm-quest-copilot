@@ -17,7 +17,6 @@ from dspy.adapters import JSONAdapter
 from dspy.adapters.utils import format_field_value, translate_field_type
 from dspy.dsp.utils.settings import settings
 
-from .consistency_checker import DialogueConsistencyChecker
 from .dialogue_module import DSPyDialogueModule
 
 logger = logging.getLogger(__name__)
@@ -151,17 +150,8 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         self._last_context_label: Optional[str] = None
         self._fewshot_used = False
 
-        # 一致性檢查（Phase 0/1）：預設開啟，可由 config 覆寫
-        self.consistency_checker = DialogueConsistencyChecker()
-        enable_flag = True
-        try:
-            if isinstance(config, dict) and 'enable_consistency_check' in config:
-                enable_flag = bool(config.get('enable_consistency_check', True))
-            elif hasattr(self, 'config') and isinstance(self.config, dict):
-                enable_flag = bool(self.config.get('enable_consistency_check', True))
-        except Exception:
-            enable_flag = True
-        self.enable_consistency_check = enable_flag
+        # 簡化：一致性檢查停用
+        self.enable_consistency_check = False
         
         # 統計信息
         self.unified_stats = {
@@ -232,9 +222,9 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             logger.info(f"✅ Call #{current_call} completed in {call_duration:.3f}s - {type(unified_prediction).__name__}")
 
 
-            parsed_responses = self._parse_responses(unified_prediction.responses)
+            _preview = self._process_responses(unified_prediction.responses)[:3]
             _log_state = getattr(unified_prediction, 'state', 'UNKNOWN')
-            logger.info(f"💬 Generated {len(parsed_responses)} responses - State: {_log_state}")
+            logger.info(f"💬 Generated {len(_preview)} responses (preview) - State: {_log_state}")
             logger.info(f"📈 API calls saved: 2 (1 vs 3 original calls)")
 
             # 更新情境偏好，供下一輪精簡提示使用
@@ -256,36 +246,15 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 logger.info(f"dialogue_context: {getattr(unified_prediction, 'dialogue_context', '')}")
                 logger.info(f"state_reasoning: {getattr(unified_prediction, 'state_reasoning', '')}")
                 # Show up to first 3 responses for brevity
-                _resp_preview = parsed_responses[:3]
-                logger.info(f"responses_preview: {_resp_preview}")
+                logger.info(f"responses_preview: {_preview}")
             except Exception:
                 pass
             
             # 處理回應格式
             responses = self._process_responses(unified_prediction.responses)
 
-            # 一致性檢查與修正（不發起額外 LLM 請求）
+            # 簡化：一致性檢查已停用
             consistency_info = None
-            if getattr(self, 'enable_consistency_check', True):
-                try:
-                    consistency_result = self.consistency_checker.check_consistency(
-                        new_responses=responses,
-                        conversation_history=conversation_history or [],
-                        character_context={
-                            'name': character_name,
-                            'persona': character_persona
-                        }
-                    )
-                    consistency_info = {
-                        'score': round(float(consistency_result.score), 3),
-                        'contradictions': len(consistency_result.contradictions),
-                        'severity': consistency_result.severity,
-                    }
-                    if consistency_result.has_contradictions:
-                        responses = self._apply_consistency_fixes(responses, consistency_result)
-                except Exception as _:
-                    # 不阻斷主流程
-                    pass
             
             # 更新統計 - 計算節省的 API 調用
             self.unified_stats['api_calls_saved'] += 2  # 原本 3次，現在 1次，節省 2次

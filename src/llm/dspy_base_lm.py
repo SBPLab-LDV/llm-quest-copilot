@@ -248,15 +248,13 @@ class BaseDSPyLM(dspy.LM):
             if not isinstance(obj, dict):
                 return text
 
+            # 僅要求統一輸出所需的 5 個欄位
             required = [
                 "reasoning",
                 "character_consistency_check",
                 "context_classification",
                 "confidence",
                 "responses",
-                "state",
-                "dialogue_context",
-                "state_reasoning",
             ]
 
             defaults = {
@@ -265,9 +263,6 @@ class BaseDSPyLM(dspy.LM):
                 "context_classification": "unspecified",
                 "confidence": "0.00",
                 "responses": [],
-                "state": "UNKNOWN",
-                "dialogue_context": "",
-                "state_reasoning": "Fields auto-filled due to missing data",
             }
 
             for key in required:
@@ -293,10 +288,6 @@ class BaseDSPyLM(dspy.LM):
             except Exception:
                 conf = 0.90
             obj["confidence"] = f"{conf:.2f}"
-
-            state = str(obj.get("state", "NORMAL"))
-            if state not in {"NORMAL", "CONFUSED", "TRANSITIONING", "TERMINATED", "ERROR"}:
-                obj["state"] = "NORMAL"
 
             normalized = json.dumps(obj, ensure_ascii=False)
             return normalized
