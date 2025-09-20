@@ -9,6 +9,7 @@
 import dspy
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
@@ -16,14 +17,13 @@ from dspy.adapters import JSONAdapter
 from dspy.adapters.utils import format_field_value, translate_field_type
 from dspy.dsp.utils.settings import settings
 
-from .consistency_checker import DialogueConsistencyChecker
 from .dialogue_module import DSPyDialogueModule
 
 logger = logging.getLogger(__name__)
 
 JSON_OUTPUT_DIRECTIVE = (
-    "[指示] 僅輸出單一 JSON 物件，欄位依序為 reasoning, character_consistency_check, context_classification, "
-    "confidence, responses, state, dialogue_context, state_reasoning。必須維持合法 JSON 語法，"
+    "[指示] 僅輸出單一 JSON 物件，至少包含欄位 reasoning, character_consistency_check, context_classification, "
+    "confidence, responses。必須維持合法 JSON 語法，"
     "所有鍵與值皆用雙引號，禁止輸出 None/null/True/False 或未封閉的字串。不得輸出任何分析或思考步驟，"
     "請直接輸出 JSON 物件（不要附加除 JSON 以外的文字）。reasoning 使用一句極短敘述（不需精確字數）。"
     "responses 必須是一個長度為 5 的 JSON 陣列；每個元素為一句簡短、自然、彼此獨立且互斥的完整繁體中文句子，"
@@ -33,7 +33,6 @@ JSON_OUTPUT_DIRECTIVE = (
     "嚴禁在回覆或生成過程中計算或提及字數；嚴禁描述規則、分析或英文內容；"
     "嚴禁輸出無關的模板句（如『謝謝關心』『我會配合治療』『目前沒有發燒』）除非問題明確在問該事項。"
     "若資訊不足，請以針對性的詢問或請求協助/查證方式回應（仍需提及核心名詞），並產生 5 條彼此不同且與題目相關的句子。"
-    "state 只能是 NORMAL、CONFUSED、TRANSITIONING、TERMINATED 其中之一；dialogue_context 與 state_reasoning 使用簡短具體描述。"
     "禁止添加 [[ ## field ## ]]、markdown 或任何額外文字，完整輸出後以 } 結束。"
 )
 
@@ -62,15 +61,13 @@ class UnifiedPatientResponseSignature(dspy.Signature):
     conversation_history = dspy.InputField(desc="近期對話與提醒")
     available_contexts = dspy.InputField(desc="候選情境")
 
-    # 輸出欄位
+    # 輸出欄位（必填）
     reasoning = dspy.OutputField(desc="推理與一致性檢查")
     character_consistency_check = dspy.OutputField(desc="角色一致性 YES/NO")
     context_classification = dspy.OutputField(desc="情境分類 ID")
     confidence = dspy.OutputField(desc="情境信心 0-1")
     responses = dspy.OutputField(desc="五個病患回應")
-    state = dspy.OutputField(desc="對話狀態")
-    dialogue_context = dspy.OutputField(desc="情境描述")
-    state_reasoning = dspy.OutputField(desc="狀態原因")
+    # state / dialogue_context / state_reasoning 由後處理自動補齊（不在 Signature 強制）
 
 
 
@@ -153,17 +150,8 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         self._last_context_label: Optional[str] = None
         self._fewshot_used = False
 
-        # 一致性檢查（Phase 0/1）：預設開啟，可由 config 覆寫
-        self.consistency_checker = DialogueConsistencyChecker()
-        enable_flag = True
-        try:
-            if isinstance(config, dict) and 'enable_consistency_check' in config:
-                enable_flag = bool(config.get('enable_consistency_check', True))
-            elif hasattr(self, 'config') and isinstance(self.config, dict):
-                enable_flag = bool(self.config.get('enable_consistency_check', True))
-        except Exception:
-            enable_flag = True
-        self.enable_consistency_check = enable_flag
+        # 簡化：一致性檢查停用
+        self.enable_consistency_check = False
         
         # 統計信息
         self.unified_stats = {
@@ -207,30 +195,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             # 獲取精簡後的可用情境清單
             available_contexts = self._build_available_contexts()
 
-            # 可選：插入 few-shot 範例（k=2），強化冷啟/語境不足回合
-            fewshot_text = ""
-            try:
-                enable_fewshot = False  # disabled to reduce prompt length and latency
-                if enable_fewshot and hasattr(self, 'example_selector'):
-                    fewshots = self.example_selector.select_examples(
-                        query=user_input, context=None, k=2, strategy="hybrid"
-                    )
-                    fs_blocks = []
-                    for i, ex in enumerate(fewshots, 1):
-                        ui = getattr(ex, 'user_input', '') or getattr(ex, 'input', '')
-                        out = getattr(ex, 'responses', None) or getattr(ex, 'output', None) or getattr(ex, 'answer', None)
-                        if isinstance(out, list) and out:
-                            out_text = str(out[0])
-                        else:
-                            out_text = str(out) if out is not None else ''
-                        fs_blocks.append(f"[範例{i}]\n護理人員: {ui}\n病患: {out_text}")
-                    if fs_blocks:
-                        fewshot_text = "\n".join(fs_blocks) + "\n"
-                        formatted_history = fewshot_text + formatted_history
-                        logger.info(f"🧩 Injected few-shot examples: {len(fs_blocks)}")
-                        self._fewshot_used = True
-            except Exception as _e:
-                logger.info(f"Few-shot injection skipped: {_e}")
+            # 簡化：不插入 few-shot 範例，降低提示長度與延遲
             
             current_call = self.unified_stats['total_unified_calls'] + 1
             logger.info(f"🚀 Unified DSPy call #{current_call} - {character_name} processing {len(conversation_history)} history entries")
@@ -257,8 +222,9 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             logger.info(f"✅ Call #{current_call} completed in {call_duration:.3f}s - {type(unified_prediction).__name__}")
 
 
-            parsed_responses = self._parse_responses(unified_prediction.responses)
-            logger.info(f"💬 Generated {len(parsed_responses)} responses - State: {unified_prediction.state}")
+            _preview = self._process_responses(unified_prediction.responses)[:3]
+            _log_state = getattr(unified_prediction, 'state', 'UNKNOWN')
+            logger.info(f"💬 Generated {len(_preview)} responses (preview) - State: {_log_state}")
             logger.info(f"📈 API calls saved: 2 (1 vs 3 original calls)")
 
             # 更新情境偏好，供下一輪精簡提示使用
@@ -280,40 +246,22 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 logger.info(f"dialogue_context: {getattr(unified_prediction, 'dialogue_context', '')}")
                 logger.info(f"state_reasoning: {getattr(unified_prediction, 'state_reasoning', '')}")
                 # Show up to first 3 responses for brevity
-                _resp_preview = parsed_responses[:3]
-                logger.info(f"responses_preview: {_resp_preview}")
+                logger.info(f"responses_preview: {_preview}")
             except Exception:
                 pass
             
             # 處理回應格式
             responses = self._process_responses(unified_prediction.responses)
 
-            # 一致性檢查與修正（不發起額外 LLM 請求）
+            # 簡化：一致性檢查已停用
             consistency_info = None
-            if getattr(self, 'enable_consistency_check', True):
-                try:
-                    consistency_result = self.consistency_checker.check_consistency(
-                        new_responses=responses,
-                        conversation_history=conversation_history or [],
-                        character_context={
-                            'name': character_name,
-                            'persona': character_persona
-                        }
-                    )
-                    consistency_info = {
-                        'score': round(float(consistency_result.score), 3),
-                        'contradictions': len(consistency_result.contradictions),
-                        'severity': consistency_result.severity,
-                    }
-                    if consistency_result.has_contradictions:
-                        responses = self._apply_consistency_fixes(responses, consistency_result)
-                except Exception as _:
-                    # 不阻斷主流程
-                    pass
             
             # 更新統計 - 計算節省的 API 調用
             self.unified_stats['api_calls_saved'] += 2  # 原本 3次，現在 1次，節省 2次
-            self._update_stats(unified_prediction.context_classification, unified_prediction.state)
+            self._update_stats(
+                getattr(unified_prediction, 'context_classification', 'unspecified'),
+                getattr(unified_prediction, 'state', 'NORMAL')
+            )
             self.stats['successful_calls'] += 1
             
             # 組合最終結果（安全補齊缺欄位）
@@ -352,17 +300,68 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             self.stats['failed_calls'] += 1
             logger.error(f"❌ Unified DSPy call failed: {type(e).__name__} - {str(e)}")
             logger.error(f"Input: {user_input[:100]}... (character: {character_name})")
-            # 返回溫和的預設回應，避免錯誤訊息外露
-            safe_responses = [
-                "目前沒有發燒，狀況穩定。",
-                "口腔仍有輕微不適，會留意變化。",
-                "我會配合治療與檢查。",
-                "若有不舒服會立刻告知您。",
-                "謝謝關心。",
+            # 嘗試從例外訊息中救回 LM 的 JSON 片段
+            try:
+                import re
+                msg = str(e)
+                start = msg.find('{')
+                end = msg.rfind('}')
+                salvaged = None
+                if start != -1 and end != -1 and end > start:
+                    snippet = msg[start:end+1]
+                    salvaged = json.loads(snippet)
+                if isinstance(salvaged, dict):
+                    salv_responses = salvaged.get('responses') or []
+                    if isinstance(salv_responses, str):
+                        try:
+                            tmp = json.loads(salv_responses)
+                            if isinstance(tmp, list):
+                                salv_responses = tmp
+                            else:
+                                salv_responses = [salv_responses]
+                        except Exception:
+                            salv_responses = [salv_responses]
+                    if not isinstance(salv_responses, list):
+                        salv_responses = [str(salv_responses)]
+                    # 使用救回的 responses，其他欄位以預設補齊
+                    return dspy.Prediction(
+                        user_input=user_input,
+                        responses=[str(x).strip() for x in salv_responses if str(x).strip()][:5] or [
+                            "我目前無法確認，請您再提供更具體的資訊。",
+                            "可否說明藥名、劑量與服用頻次？",
+                            "如果不確定，請直接說不確定。",
+                            "我會依據您提供的資訊再回覆。",
+                            "謝謝。",
+                        ],
+                        state="NORMAL",
+                        dialogue_context=str(salvaged.get('dialogue_context') or 'unspecified'),
+                        confidence=float(salvaged.get('confidence') or 0.9),
+                        reasoning=str(salvaged.get('reasoning') or 'salvaged from error'),
+                        context_classification=str(salvaged.get('context_classification') or 'unspecified'),
+                        examples_used=0,
+                        processing_info={
+                            'unified_call': True,
+                            'api_calls_saved': 2,
+                            'state_reasoning': 'auto-filled due to exception',
+                            'timestamp': datetime.now().isoformat(),
+                            'fallback_used': True,
+                            'salvaged': True,
+                        }
+                    )
+            except Exception:
+                logger.warning("Salvage from AdapterParseError failed", exc_info=True)
+
+            # 中立的兜底回覆，避免誤導（不再提及發燒/治療等內容）
+            neutral_responses = [
+                "我目前無法確認，請您再提供更具體的資訊。",
+                "可否說明藥名、劑量與服用頻次？",
+                "如果不確定，請直接說不確定。",
+                "我會依據您提供的資訊再回覆。",
+                "謝謝。",
             ]
             return dspy.Prediction(
                 user_input=user_input,
-                responses=safe_responses,
+                responses=neutral_responses,
                 state="NORMAL",
                 dialogue_context="unspecified",
                 confidence=0.9,
@@ -374,7 +373,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                     'api_calls_saved': 2,
                     'state_reasoning': 'auto-filled due to exception',
                     'timestamp': datetime.now().isoformat(),
-                    'fallback_used': False
+                    'fallback_used': True
                 }
             )
     
@@ -618,42 +617,56 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         if not conversation_history:
             return reminder
 
-        max_history = 3
+        # 固定歷史視窗：10 輪對話 ≈ 20 行（去除系統行）；不再動態調整
+        window_lines = 20
+        # 準備非系統的原始對話行
+        non_system = [x for x in conversation_history if isinstance(x, str) and not x.strip().startswith('[')]
+        recent = non_system[-window_lines:]
 
-        if len(conversation_history) <= max_history:
-            trimmed = list(conversation_history)
-        else:
-            important = conversation_history[:2]
-            recent = conversation_history[-(max_history - len(important)) :]
-            combined = important + recent
-            seen = set()
-            trimmed = []
-            for item in combined:
-                if item not in seen:
-                    trimmed.append(item)
-                    seen.add(item)
+        def _is_caregiver(line: str) -> bool:
+            return isinstance(line, str) and line.strip().startswith("護理人員:")
 
+        def _is_system(line: str) -> bool:
+            s = line.strip() if isinstance(line, str) else ""
+            return s.startswith("[") or s.startswith("[系統]") or s.startswith("(系統)")
+
+        def _is_patient(line: str) -> bool:
+            s = line.strip() if isinstance(line, str) else ""
+            # 僅將病患名開頭或 Patient_ 前綴視為病患，避免把系統/其他角色誤判
+            if not s or _is_system(s):
+                return False
+            if s.startswith(f"{character_name}:"):
+                return True
+            if s.startswith("Patient_"):
+                return True
+            if s.startswith("病患:"):
+                return True
+            return False
+
+        has_caregiver = any(_is_caregiver(x) for x in recent)
+        has_patient = any(_is_patient(x) for x in recent)
+        selected = list(recent)
+
+        # 產生條列摘要
         summary_lines: List[str] = []
         seen_bullets: set[str] = set()
-        for entry in trimmed[-max_history:]:
+
+        def _trim(s: str, n: int = 180) -> str:
+            s = s.strip()
+            return (s[:n] + '…') if len(s) > n else s
+        # 逐行帶入所有非系統行，保持原始順序（固定 10 輪 ≈ 20 行）
+        for entry in selected:
             if not entry:
                 continue
             text = entry.strip()
-            if not text:
+            if not text or _is_system(text):
                 continue
-            if ':' in text:
-                speaker, content = text.split(':', 1)
-                bullet = f"- {speaker.strip()}: {content.strip()}"
-            else:
-                bullet = f"- {text}"
-            if bullet in seen_bullets:
-                continue
-            seen_bullets.add(bullet)
-            summary_lines.append(bullet)
+            summary_lines.append(f"- {_trim(text)}")
 
         formatted = "\n".join(summary_lines)
+        # 在日誌中標示 window 與實際帶入行數，便於檢視
         logger.info(
-            f"🔧 History management: {len(conversation_history)} entries processed for {character_name}"
+            f"🔧 History management: total={len(conversation_history)} window_lines={window_lines} selected_count={len(summary_lines)} for {character_name}"
         )
         return f"{formatted}\n{reminder}"
     

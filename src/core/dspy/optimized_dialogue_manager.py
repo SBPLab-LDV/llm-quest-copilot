@@ -9,7 +9,6 @@
 import json
 import logging
 import re
-import time
 from typing import Any, Dict, List, Optional, Union
 
 from ..dialogue import DialogueManager
@@ -146,16 +145,9 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 if self.optimization_stats['total_conversations'] > 0 else 0
             )
             
-            # 讓 rewrite 模組決策是否需要改寫
+            # 讓 rewrite 模組決策是否需要改寫（若停用，直接使用基礎預測）
             rewrite_result = self._attempt_sensitive_rewrite(user_input, prediction)
-
-            if rewrite_result:
-                response_data = rewrite_result
-            else:
-                response_data = self._process_optimized_prediction(prediction)
-
-            # 僅監測退化狀態，不改寫回應內容
-            response_data = self._apply_degradation_prevention(response_data, user_input)
+            response_data = rewrite_result if rewrite_result else self._process_optimized_prediction(prediction)
             
             # ====== Phase 1.3: 會話狀態變化追蹤 ======
             round_number = len(self.conversation_history) // 2 + 1  # 估算輪次
@@ -182,15 +174,13 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 if isinstance(fallback_result, str):
                     try:
                         fallback_data = json.loads(fallback_result)
-                        # 應用退化防護到父類回應
-                        protected_data = self._apply_degradation_prevention(fallback_data, user_input)
-                        return json.dumps(protected_data, ensure_ascii=False)
+                        return json.dumps(fallback_data, ensure_ascii=False)
                     except json.JSONDecodeError:
                         # 不是 JSON，直接返回
                         return fallback_result
                 else:
-                    # 父類返回字典，直接應用防護
-                    return self._apply_degradation_prevention(fallback_result, user_input)
+                    # 父類返回字典，直接返回
+                    return fallback_result
                     
             except Exception as fallback_error:
                 self.logger.error(f"父類回退也失敗: {fallback_error}")
@@ -465,74 +455,9 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
   - 整體效率: 提升 3倍，解決配額限制問題
 """
     
-    def _apply_degradation_prevention(self, response_data: dict, user_input: str) -> dict:
-        """應用退化防護措施，檢測並修復問題回應"""
-        try:
-            self.logger.info(f"🔍 DEGRADATION PREVENTION: Checking response data")
-            responses = response_data.get("responses", [])
-            self.logger.info(f"🔍 DEGRADATION PREVENTION: Found {len(responses)} responses")
-            
-            if not responses:
-                self.logger.info(f"🔍 DEGRADATION PREVENTION: No responses, returning original")
-                return response_data
-            
-            # 檢測退化模式
-            has_degradation = False
-            degradation_indicators = []
-            
-            for i, response in enumerate(responses):
-                response_str = str(response)
-                self.logger.info(f"🔍 DEGRADATION PREVENTION: Checking response {i+1}: '{response_str[:50]}...'")
-                
-                # 檢測自我介紹模式
-                if any(pattern in response_str for pattern in ["我是Patient", "您好，我是", "我是病患"]):
-                    has_degradation = True
-                    degradation_indicators.append("self_introduction")
-                    self.logger.warning(f"🚨 DETECTED: Self-introduction pattern in response {i+1}")
-                
-                # 檢測通用回應模式與錯誤模板
-                if any(pattern in response_str for pattern in ["我可能沒有完全理解", "能請您換個方式說明", "您需要什麼幫助嗎", "抱歉，我現在無法正確回應"]):
-                    has_degradation = True
-                    degradation_indicators.append("generic_responses")
-                    self.logger.warning(f"🚨 DETECTED: Generic response pattern in response {i+1}")
-
-            # 若狀態為 CONFUSED，也視為退化並進行修復
-            if response_data.get("state") == "CONFUSED":
-                has_degradation = True
-                if "confused_state" not in degradation_indicators:
-                    degradation_indicators.append("confused_state")
-            
-            if has_degradation:
-                self.logger.warning(f"🚨 DEGRADATION PREVENTION: 檢測到退化模式 {degradation_indicators}，啟動修復機制")
-                response_data["degradation_detected"] = True
-                response_data["original_degradation"] = degradation_indicators
-            else:
-                self.logger.info(f"✅ DEGRADATION PREVENTION: No degradation detected, keeping original responses")
-
-            return response_data
-            
-        except Exception as e:
-            self.logger.error(f"🚨 DEGRADATION PREVENTION: 退化防護失敗: {e}")
-            import traceback
-            self.logger.error(f"🚨 DEGRADATION PREVENTION: Traceback: {traceback.format_exc()}")
-            return response_data
+    # 已移除：退化防護層
     
-    def _trigger_context_reset(self):
-        """觸發上下文重置，防止後續退化"""
-        try:
-            # 清理對話歷史，保留最近的關鍵信息
-            if len(self.conversation_history) > 4:
-                # 只保留最近2輪對話
-                recent_history = self.conversation_history[-4:]
-                self.conversation_history = recent_history
-                self.logger.info(f"🔄 執行上下文重置，保留最近 {len(recent_history)} 條記錄")
-            
-            # 重置 DSPy 模組內部狀態（如果可能）
-            if hasattr(self.dialogue_module, 'reset_context'):
-                self.dialogue_module.reset_context()
-                
-        except Exception as e:
-            self.logger.error(f"上下文重置失敗: {e}")
+    # 簡化：移除未使用的上下文重置功能
 
 
     def _normalize_responses(self, responses) -> list:
@@ -673,9 +598,6 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             )
 
             response_data = self._process_optimized_prediction(rewritten_prediction)
-            response_data["sensitive_rewrite_pending"] = True
-            response_data = self._apply_degradation_prevention(response_data, rewritten_question)
-            response_data.pop("sensitive_rewrite_pending", None)
             response_data["sensitive_rewrite_applied"] = True
             response_data["sensitive_rewrite"] = {
                 "original_question": original_question,
@@ -731,27 +653,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             for metric, value in quality_metrics.items():
                 self.logger.info(f"    {metric}: {value}")
             
-            # 退化風險評估
-            degradation_risk = self._assess_degradation_risk(response_data, round_number)
-            self.logger.info(f"  ⚠️  Degradation Risk: {degradation_risk['risk_level']} ({degradation_risk['score']:.2f})")
-            
-            # 會話複雜度分析
-            complexity_analysis = self._analyze_conversation_complexity()
-            self.logger.info(f"  🧮 Conversation Complexity:")
-            for key, value in complexity_analysis.items():
-                self.logger.info(f"    {key}: {value}")
-            
-            # 記憶使用情況
-            memory_info = self._track_memory_usage()
-            self.logger.info(f"  💾 Memory Usage: {memory_info}")
-            
-            # 如果是關鍵輪次（3-5輪），額外記錄
-            if 3 <= round_number <= 5:
-                self.logger.warning(f"🚨 CRITICAL ROUND {round_number} - Enhanced monitoring active")
-                self._log_critical_round_analysis(user_input, response_data, round_number)
-            
-            # 儲存狀態歷史（用於趨勢分析）
-            self._store_session_state_history(session_state, round_number)
+            # 簡化：移除退化風險/複雜度/記憶體與關鍵輪分析及狀態歷史記錄
             
         except Exception as e:
             self.logger.error(f"會話狀態追蹤失敗: {e}")
@@ -865,119 +767,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
         except Exception:
             return 0.5
     
-    def _assess_degradation_risk(self, response_data: dict, round_number: int) -> dict:
-        """評估退化風險"""
-        try:
-            risk_score = 0.0
-            risk_factors = []
-            
-            # 輪次風險（第4-5輪風險較高）
-            if 4 <= round_number <= 5:
-                risk_score += 0.3
-                risk_factors.append("Critical_Round")
-            
-            # 回應品質風險
-            responses = response_data.get("responses", [])
-            if len(responses) < 3:
-                risk_score += 0.2
-                risk_factors.append("Few_Responses")
-            
-            # 自我介紹風險
-            if self._has_self_introduction(response_data):
-                risk_score += 0.4
-                risk_factors.append("Self_Introduction")
-            
-            # 狀態風險
-            if response_data.get("state") == "CONFUSED":
-                risk_score += 0.1
-                risk_factors.append("Confused_State")
-            
-            # 確定風險等級
-            if risk_score >= 0.7:
-                risk_level = "HIGH"
-            elif risk_score >= 0.4:
-                risk_level = "MEDIUM"
-            elif risk_score >= 0.2:
-                risk_level = "LOW"
-            else:
-                risk_level = "MINIMAL"
-            
-            return {
-                "score": risk_score,
-                "risk_level": risk_level,
-                "factors": risk_factors
-            }
-            
-        except Exception as e:
-            return {"score": 1.0, "risk_level": "ERROR", "factors": [str(e)]}
-    
-    def _analyze_conversation_complexity(self) -> dict:
-        """分析對話複雜度"""
-        try:
-            history_length = len(self.conversation_history)
-            total_chars = sum(len(entry) for entry in self.conversation_history)
-            
-            return {
-                "History_Entries": history_length,
-                "Total_Characters": total_chars,
-                "Average_Entry_Length": total_chars // max(1, history_length),
-                "Estimated_Rounds": history_length // 2,
-                "Complexity_Level": (
-                    "High" if total_chars > 2000 else
-                    "Medium" if total_chars > 1000 else
-                    "Low"
-                )
-            }
-        except Exception:
-            return {"Error": "Analysis failed"}
-    
-    def _track_memory_usage(self) -> str:
-        """追蹤記憶體使用情況"""
-        try:
-            import psutil
-            process = psutil.Process()
-            memory_mb = process.memory_info().rss / 1024 / 1024
-            return f"{memory_mb:.1f} MB"
-        except ImportError:
-            return "N/A (psutil not available)"
-        except Exception:
-            return "Error"
-    
-    def _log_critical_round_analysis(self, user_input: str, response_data: dict, round_number: int):
-        """記錄關鍵輪次的詳細分析"""
-        self.logger.warning(f"🔍 CRITICAL ROUND {round_number} DETAILED ANALYSIS:")
-        self.logger.warning(f"  📥 Input: '{user_input}'")
-        self.logger.warning(f"  📊 Response State: {response_data.get('state', 'UNKNOWN')}")
-        self.logger.warning(f"  🌍 Context: {response_data.get('dialogue_context', 'UNKNOWN')}")
-        self.logger.warning(f"  💬 Response Count: {len(response_data.get('responses', []))}")
-        
-        # 詳細回應分析
-        responses = response_data.get('responses', [])
-        for i, response in enumerate(responses, 1):
-            has_issues = any(pattern in str(response) for pattern in ["我是Patient", "沒有完全理解", "您需要什麼幫助"])
-            status = "🔴 PROBLEMATIC" if has_issues else "✅ OK"
-            self.logger.warning(f"    Response {i}: {status} - '{str(response)[:100]}...'")
-    
-    def _store_session_state_history(self, session_state: dict, round_number: int):
-        """儲存會話狀態歷史"""
-        try:
-            if not hasattr(self, '_session_history'):
-                self._session_history = []
-            
-            history_entry = {
-                "round": round_number,
-                "timestamp": time.time(),
-                "state": session_state
-            }
-            
-            self._session_history.append(history_entry)
-            
-            # 只保留最近10輪的記錄
-            if len(self._session_history) > 10:
-                self._session_history = self._session_history[-10:]
-                
-        except Exception as e:
-            self.logger.error(f"狀態歷史儲存失敗: {e}")
+    # 簡化：移除退化風險/複雜度/記憶體與關鍵輪分析與狀態歷史方法（無行為影響）
     
     def _generate_emergency_response(self, user_input: str) -> str:
         """生成緊急恢復回應，當所有其他方法都失敗時使用"""
