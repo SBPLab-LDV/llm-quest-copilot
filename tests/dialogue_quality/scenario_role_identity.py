@@ -11,6 +11,7 @@ from tests.dialogue_quality.common import (
     FALLBACK_PATTERNS,
     SELF_INTRO_PATTERNS,
     TranscriptRecorder,
+    get_character_config,
 )
 
 ROLE_DRIFT_PATTERNS = [
@@ -90,6 +91,7 @@ def run_scenario(
         recorder.divider("病患角色一致性場景")
         recorder.log(f"Base URL: {base_url}")
         recorder.log(f"Character ID: {character_id}")
+        character_config = get_character_config(character_id)
         recorder.log()
 
         for idx, turn in enumerate(turns, start=1):
@@ -108,6 +110,7 @@ def run_scenario(
                         "character_id": character_id,
                         "session_id": session_id,
                         "response_format": "text",
+                        "character_config": character_config,
                     },
                     timeout=45,
                 )
