@@ -15,6 +15,7 @@ from tests.dialogue_quality.common import (
     GENERIC_PATTERNS,
     SELF_INTRO_PATTERNS,
     TranscriptRecorder,
+    get_character_config,
 )
 
 
@@ -29,6 +30,7 @@ def test_dialogue_degradation(recorder: Optional[TranscriptRecorder] = None) -> 
     # 測試配置
     base_url = DEFAULT_BASE_URL
     character_id = DEFAULT_CHARACTER_ID
+    character_config = get_character_config(character_id)
 
     # 標準化測試對話 - 逐步檢查狀態與追問
     test_conversations = [
@@ -66,7 +68,8 @@ def test_dialogue_degradation(recorder: Optional[TranscriptRecorder] = None) -> 
                     "text": user_input,
                     "character_id": character_id,
                     "session_id": session_id,
-                    "response_format": "text"
+                    "response_format": "text",
+                    "character_config": character_config,
                 },
                 timeout=120
             )
@@ -275,8 +278,9 @@ def test_same_input_degradation(recorder: Optional[TranscriptRecorder] = None) -
 
     # 使用相同的輸入測試5次
     same_input = "你好，感覺怎麼樣？"
-    base_url = "http://localhost:8000"
-    character_id = "1"
+    base_url = DEFAULT_BASE_URL
+    character_id = DEFAULT_CHARACTER_ID
+    character_config = get_character_config(character_id)
     session_id = None
 
     results = []
@@ -292,7 +296,8 @@ def test_same_input_degradation(recorder: Optional[TranscriptRecorder] = None) -
                     "text": same_input,
                     "character_id": character_id,
                     "session_id": session_id,
-                    "response_format": "text"
+                    "response_format": "text",
+                    "character_config": character_config,
                 },
                 timeout=120
             )
