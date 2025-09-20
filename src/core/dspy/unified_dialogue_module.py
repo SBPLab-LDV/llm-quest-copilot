@@ -619,63 +619,56 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         if not conversation_history:
             return reminder
 
-        # 允許透過環境變數 DSPY_MAX_HISTORY 動態調整歷史視窗（預設 3）
-        max_history = 3
-        try:
-            env_mh = int(os.getenv('DSPY_MAX_HISTORY', '3'))
-            if 1 <= env_mh <= 20:
-                max_history = env_mh
-        except Exception:
-            pass
-
-        # Plan A：直接取最近 max_history 條，並儘量同時包含護理人員與病患
-        recent = conversation_history[-max_history:]
+        # 固定歷史視窗：10 輪對話 ≈ 20 行（去除系統行）；不再動態調整
+        window_lines = 20
+        # 準備非系統的原始對話行
+        non_system = [x for x in conversation_history if isinstance(x, str) and not x.strip().startswith('[')]
+        recent = non_system[-window_lines:]
 
         def _is_caregiver(line: str) -> bool:
             return isinstance(line, str) and line.strip().startswith("護理人員:")
 
+        def _is_system(line: str) -> bool:
+            s = line.strip() if isinstance(line, str) else ""
+            return s.startswith("[") or s.startswith("[系統]") or s.startswith("(系統)")
+
         def _is_patient(line: str) -> bool:
-            return isinstance(line, str) and (': ' in line) and (not _is_caregiver(line))
+            s = line.strip() if isinstance(line, str) else ""
+            # 僅將病患名開頭或 Patient_ 前綴視為病患，避免把系統/其他角色誤判
+            if not s or _is_system(s):
+                return False
+            if s.startswith(f"{character_name}:"):
+                return True
+            if s.startswith("Patient_"):
+                return True
+            if s.startswith("病患:"):
+                return True
+            return False
 
         has_caregiver = any(_is_caregiver(x) for x in recent)
         has_patient = any(_is_patient(x) for x in recent)
         selected = list(recent)
 
-        if not (has_caregiver and has_patient):
-            # 從整段歷史中（由近至遠）補上缺失一方的最近一條
-            missing_role = 'caregiver' if not has_caregiver else 'patient'
-            for entry in reversed(conversation_history):
-                if missing_role == 'caregiver' and _is_caregiver(entry):
-                    if entry not in selected:
-                        selected = (selected + [entry])[-max_history:]
-                    break
-                if missing_role == 'patient' and _is_patient(entry):
-                    if entry not in selected:
-                        selected = (selected + [entry])[-max_history:]
-                    break
-
         # 產生條列摘要
         summary_lines: List[str] = []
         seen_bullets: set[str] = set()
+
+        def _trim(s: str, n: int = 180) -> str:
+            s = s.strip()
+            return (s[:n] + '…') if len(s) > n else s
+        # 逐行帶入所有非系統行，保持原始順序（固定 10 輪 ≈ 20 行）
         for entry in selected:
             if not entry:
                 continue
             text = entry.strip()
-            if not text:
+            if not text or _is_system(text):
                 continue
-            if ':' in text:
-                speaker, content = text.split(':', 1)
-                bullet = f"- {speaker.strip()}: {content.strip()}"
-            else:
-                bullet = f"- {text}"
-            if bullet in seen_bullets:
-                continue
-            seen_bullets.add(bullet)
-            summary_lines.append(bullet)
+            summary_lines.append(f"- {_trim(text)}")
 
         formatted = "\n".join(summary_lines)
+        # 在日誌中標示 window 與實際帶入行數，便於檢視
         logger.info(
-            f"🔧 History management: {len(conversation_history)} entries processed for {character_name}"
+            f"🔧 History management: total={len(conversation_history)} window_lines={window_lines} selected_count={len(summary_lines)} for {character_name}"
         )
         return f"{formatted}\n{reminder}"
     

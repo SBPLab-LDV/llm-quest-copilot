@@ -46,9 +46,10 @@ class DialogueManager:
         """Format the conversation history.
         
         Returns:
-            List of the last 5 conversation turns
+            List of the last 10 conversation turns (caregiver/patient lines)
         """
-        return self.conversation_history[-5:]  # 只保留最近5輪對話
+        # 固定保留最近 10 輪（約 20 行，這裡以行為單位粗略近似）
+        return self.conversation_history[-20:]
     
     def _clean_json_string(self, text: str) -> str:
         """Clean and format JSON string.

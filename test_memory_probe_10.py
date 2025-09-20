@@ -19,9 +19,8 @@ CHARACTER_ID = os.environ.get("CHARACTER_ID", "1")
 
 
 def set_max_history(n: int) -> None:
-    url = f"{BASE_URL}/api/dev/config/set_max_history"
-    r = requests.post(url, headers={"Content-Type": "application/json"}, json={"max_history": n}, timeout=10)
-    r.raise_for_status()
+    # 固定 10 輪策略：不再動態設置，保留函數以兼容但不呼叫端點
+    pass
 
 
 def post_text(text: str, session_id: Optional[str]) -> Dict[str, Any]:
@@ -48,23 +47,24 @@ def analyze_mentions(responses: List[str], keywords: List[str]) -> Dict[str, int
     return {kw: sum(1 for r in responses if kw in r) for kw in keywords}
 
 
-def run_scenario(max_history: int) -> Dict[str, Any]:
-    print(f"\n=== Running 10-turn probe with max_history={max_history} ===")
-    set_max_history(max_history)
+def run_scenario(window_turns: int = 10) -> Dict[str, Any]:
+    print(f"\n=== Running 10-turn probe (fixed window=10 turns) ===")
+    set_max_history(window_turns)
 
     # 10-turn script
-    # T3 plants anchor: 阿莫西林 500mg 一天三次
+    # T3 改為「提問式」引導病患提供錨點（而非由護理人員直接陳述）
+    # T9 釘選：重述錨點，引導在 T10 回憶時命中
     turns = [
         "你好，感覺怎麼樣？",
         "有沒有覺得發燒或不舒服？",
-        "我昨天開始服用阿莫西林500mg，一天三次，目前疼痛稍微減輕。",
+        "你目前正在使用的藥名、劑量與服用頻次是什麼？請清楚說明。",
         "從什麼時候開始的？",
         "還有其他症狀嗎？",
         "昨晚睡眠品質如何？",
         "今天活動量大概多少？",
         "目前飲食有沒有不舒服的地方？",
-        "需要再加藥或調整劑量嗎？",
-        "你第三輪說的藥名、劑量和頻次是什麼？",
+        "請你再次清楚說明之前提到的藥名、劑量與服用頻次；若不確定請直接說不確定。",
+        "請逐字重述你先前說過的藥名、劑量與服用頻次（若不確定請直接說不確定）。",
     ]
 
     session_id: Optional[str] = None
@@ -97,25 +97,14 @@ def run_scenario(max_history: int) -> Dict[str, Any]:
 
 
 def main():
-    groupA = run_scenario(3)
-    groupB = run_scenario(8)
+    group = run_scenario(10)
 
     def fmt(m: Dict[str, int]) -> str:
         return ", ".join(f"{k}={v}" for k, v in m.items())
 
-    print("\n=== Comparison Summary ===")
-    print(f"A (max_history=3)  mentions: {fmt(groupA['mentions'])}")
-    print(f"B (max_history=8)  mentions: {fmt(groupB['mentions'])}")
-    
-    # Basic judgment: if B mentions more anchors than A, window expansion helped.
-    scoreA = sum(groupA['mentions'].values())
-    scoreB = sum(groupB['mentions'].values())
-    verdict = "IMPROVED" if scoreB > scoreA else ("SAME" if scoreB == scoreA else "WORSE")
-    print(f"Verdict: {verdict} (A={scoreA}, B={scoreB})")
-
-    # Output session ids for reference
-    print(f"Sessions: A={groupA['session_id']} | B={groupB['session_id']}")
+    print("\n=== Summary ===")
+    print(f"mentions: {fmt(group['mentions'])}")
+    print(f"session: {group['session_id']}")
 
 if __name__ == "__main__":
     main()
-
