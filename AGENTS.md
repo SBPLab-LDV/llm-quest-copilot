@@ -3,11 +3,13 @@
 ## 專案開發規範
 
 ### 核心開發哲學 - DSPy First & Prompt-Based 優先原則
-**優先使用 DSPy 內建功能和 LLM 的 prompt-based 能力（如 Gemini、Ollama 等），避免過度撰寫複雜自定義程式碼**
+**優先使用 DSPy 內建功能和 LLM 的 prompt-based 能力（如 Ollama、Gemini 等），避免過度撰寫複雜自定義程式碼**
+
+> 後端澄清（2025-09-20）：本專案目前預設的 LLM 執行後端為「Ollama」。本文檔與提交訊息中若提及「LLM」，皆以 Ollama 為實際執行後端；僅在需要跨供應商描述時以「LLM（Ollama）」表述。
 
 #### 開發優先級排序
 1. **DSPy 內建模組優先**: 優先使用 DSPy 提供的現成 Signature、Module、Optimizer 等
-2. **Prompt Engineering**: 透過精心設計的 prompt 讓 Gemini 自行完成複雜邏輯
+2. **Prompt Engineering**: 透過精心設計的 prompt 讓 LLM（Ollama）自行完成複雜邏輯
 3. **DSPy 組合模式**: 使用 DSPy 的 Chain、Parallel、Conditional 等組合現有模組
 4. **最小化自定義程式碼**: 只有在 DSPy 無法直接支援時才撰寫自定義邏輯
 
@@ -19,7 +21,7 @@
 
 #### 範例對比
 ❌ **錯誤做法**: 自行實作複雜的對話狀態管理邏輯
-✅ **正確做法**: 使用 DSPy Signature 定義狀態轉換，讓 Gemini 透過 prompt 處理
+✅ **正確做法**: 使用 DSPy Signature 定義狀態轉換，讓 LLM（Ollama）透過 prompt 處理
 
 ❌ **錯誤做法**: 手寫複雜的 JSON 解析和驗證程式碼
 ✅ **正確做法**: 使用 DSPy JSONAdapter 和精確的 output format prompt
@@ -51,7 +53,7 @@
 - **邊界測試**: 極端情況和錯誤處理
 - **性能測試**: 修復對系統性能的影響
 - **一致性測試**: 多次執行結果的穩定性
-- **推理品質測試**: 驗證 Gemini 收到有意義的 prompt 並產生有意義的推理
+- **推理品質測試**: 驗證 LLM（Ollama）收到有意義的 prompt 並產生有意義的推理
 - **Prompt 有效性測試**: 確認 prompt 完整傳遞且包含必要資訊
 - **反模板化測試**: 檢測並避免自我介紹、通用回應等模板化問題
 
@@ -78,7 +80,7 @@
    - 驗證對話歷史格式正確且包含角色一致性提醒
 
 2. **Prompt 傳遞機制檢查**
-   - 確認 DSPy 到 LLM 的 prompt 構建正確
+   - 確認 DSPy 到 LLM（Ollama）的 prompt 構建正確
    - 檢查是否包含完整的 Signature 指導
    - 驗證 JSON 格式要求是否明確傳達
 
@@ -108,7 +110,7 @@
    ```
    當出現模板回應時，必須分析：
    A. 技術層面問題:
-      - Prompt 是否正確傳遞到 Gemini?
+      - Prompt 是否正確傳遞到 LLM（Ollama）?
       - DSPy Signature 設定是否正確?
       - JSON 解析是否有錯誤?
 
@@ -168,7 +170,7 @@ ACTUAL TEST RESULTS:
 - [錯誤影響範圍分析]
 - [失敗的測試案例]
 
-🧠 GEMINI REASONING ANALYSIS:
+🧠 OLLAMA REASONING ANALYSIS:
 - Prompt Quality: [✅ 完整 / ⚠️ 部分缺失 / ❌ 有問題]
 - Reasoning Content: [✅ 具體邏輯 / ⚠️ 部分通用 / ❌ 模板化]
 - Response Quality: [✅ 多樣化角色回應 / ⚠️ 部分模板 / ❌ 模板回應]
