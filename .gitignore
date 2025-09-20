@@ -11,7 +11,8 @@ __pycache__/
 .vscode/
 .idea/ 
 
-logs/
+# Log files are tracked via Git LFS (see .gitattributes), so do not ignore this directory.
+ui_debug.log
 recordings/
 third_party/
 markitdown/

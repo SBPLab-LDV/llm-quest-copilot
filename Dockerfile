@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-# 暴露 FastAPI 端口
+# 暴露 FastAPI 與 Web UI 端口
 EXPOSE 8000
 EXPOSE 7860
 

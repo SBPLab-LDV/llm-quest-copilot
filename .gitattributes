@@ -1,0 +1,2 @@
+# Track all files under logs/ with Git LFS per project policy
+logs/** filter=lfs diff=lfs merge=lfs -text

@@ -20,7 +20,11 @@ class GeminiClient:
             # 詳細記錄發送給 API 的請求
             self.logger.info(f"===== 發送請求到 Gemini API =====")
             self.logger.info(f"模型: gemini-2.0-flash-exp")
-            self.logger.debug(f"提示詞: {prompt[:100]}... (截斷顯示)")
+            # 安全地處理 prompt 日誌
+            if isinstance(prompt, str):
+                self.logger.debug(f"提示詞: {prompt[:100]}... (截斷顯示)")
+            else:
+                self.logger.debug(f"提示詞類型: {type(prompt)}, 內容: {str(prompt)[:100]}... (截斷顯示)")
             
             # 設定生成參數以確保更好的格式控制
             generation_config = {
@@ -71,10 +75,14 @@ class GeminiClient:
             return response_text
             
         except Exception as e:
-            # 記錄錯誤
             self.logger.error(f"Gemini API 呼叫失敗: {e}", exc_info=True)
-            # 如果生成失敗，返回一個基本的錯誤回應
-            return '{"responses": ["抱歉，我現在無法正確回應"],"state": "CONFUSED"}'
+            error_payload = {
+                "error": {
+                    "type": type(e).__name__,
+                    "message": str(e)
+                }
+            }
+            return json.dumps(error_payload, ensure_ascii=False)
     
     def transcribe_audio(self, audio_file_path: str) -> str:
         """將音頻文件轉換為文本，同時處理斷斷續續的語音並提供多個可能的完整句子選項
