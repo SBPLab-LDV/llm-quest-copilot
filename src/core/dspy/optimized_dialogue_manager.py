@@ -9,7 +9,6 @@
 import json
 import logging
 import re
-import time
 from typing import Any, Dict, List, Optional, Union
 
 from ..dialogue import DialogueManager
@@ -768,119 +767,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
         except Exception:
             return 0.5
     
-    def _assess_degradation_risk(self, response_data: dict, round_number: int) -> dict:
-        """評估退化風險"""
-        try:
-            risk_score = 0.0
-            risk_factors = []
-            
-            # 輪次風險（第4-5輪風險較高）
-            if 4 <= round_number <= 5:
-                risk_score += 0.3
-                risk_factors.append("Critical_Round")
-            
-            # 回應品質風險
-            responses = response_data.get("responses", [])
-            if len(responses) < 3:
-                risk_score += 0.2
-                risk_factors.append("Few_Responses")
-            
-            # 自我介紹風險
-            if self._has_self_introduction(response_data):
-                risk_score += 0.4
-                risk_factors.append("Self_Introduction")
-            
-            # 狀態風險
-            if response_data.get("state") == "CONFUSED":
-                risk_score += 0.1
-                risk_factors.append("Confused_State")
-            
-            # 確定風險等級
-            if risk_score >= 0.7:
-                risk_level = "HIGH"
-            elif risk_score >= 0.4:
-                risk_level = "MEDIUM"
-            elif risk_score >= 0.2:
-                risk_level = "LOW"
-            else:
-                risk_level = "MINIMAL"
-            
-            return {
-                "score": risk_score,
-                "risk_level": risk_level,
-                "factors": risk_factors
-            }
-            
-        except Exception as e:
-            return {"score": 1.0, "risk_level": "ERROR", "factors": [str(e)]}
-    
-    def _analyze_conversation_complexity(self) -> dict:
-        """分析對話複雜度"""
-        try:
-            history_length = len(self.conversation_history)
-            total_chars = sum(len(entry) for entry in self.conversation_history)
-            
-            return {
-                "History_Entries": history_length,
-                "Total_Characters": total_chars,
-                "Average_Entry_Length": total_chars // max(1, history_length),
-                "Estimated_Rounds": history_length // 2,
-                "Complexity_Level": (
-                    "High" if total_chars > 2000 else
-                    "Medium" if total_chars > 1000 else
-                    "Low"
-                )
-            }
-        except Exception:
-            return {"Error": "Analysis failed"}
-    
-    def _track_memory_usage(self) -> str:
-        """追蹤記憶體使用情況"""
-        try:
-            import psutil
-            process = psutil.Process()
-            memory_mb = process.memory_info().rss / 1024 / 1024
-            return f"{memory_mb:.1f} MB"
-        except ImportError:
-            return "N/A (psutil not available)"
-        except Exception:
-            return "Error"
-    
-    def _log_critical_round_analysis(self, user_input: str, response_data: dict, round_number: int):
-        """記錄關鍵輪次的詳細分析"""
-        self.logger.warning(f"🔍 CRITICAL ROUND {round_number} DETAILED ANALYSIS:")
-        self.logger.warning(f"  📥 Input: '{user_input}'")
-        self.logger.warning(f"  📊 Response State: {response_data.get('state', 'UNKNOWN')}")
-        self.logger.warning(f"  🌍 Context: {response_data.get('dialogue_context', 'UNKNOWN')}")
-        self.logger.warning(f"  💬 Response Count: {len(response_data.get('responses', []))}")
-        
-        # 詳細回應分析
-        responses = response_data.get('responses', [])
-        for i, response in enumerate(responses, 1):
-            has_issues = any(pattern in str(response) for pattern in ["我是Patient", "沒有完全理解", "您需要什麼幫助"])
-            status = "🔴 PROBLEMATIC" if has_issues else "✅ OK"
-            self.logger.warning(f"    Response {i}: {status} - '{str(response)[:100]}...'")
-    
-    def _store_session_state_history(self, session_state: dict, round_number: int):
-        """儲存會話狀態歷史"""
-        try:
-            if not hasattr(self, '_session_history'):
-                self._session_history = []
-            
-            history_entry = {
-                "round": round_number,
-                "timestamp": time.time(),
-                "state": session_state
-            }
-            
-            self._session_history.append(history_entry)
-            
-            # 只保留最近10輪的記錄
-            if len(self._session_history) > 10:
-                self._session_history = self._session_history[-10:]
-                
-        except Exception as e:
-            self.logger.error(f"狀態歷史儲存失敗: {e}")
+    # 簡化：移除退化風險/複雜度/記憶體與關鍵輪分析與狀態歷史方法（無行為影響）
     
     def _generate_emergency_response(self, user_input: str) -> str:
         """生成緊急恢復回應，當所有其他方法都失敗時使用"""
