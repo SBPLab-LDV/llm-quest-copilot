@@ -205,30 +205,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             # 獲取精簡後的可用情境清單
             available_contexts = self._build_available_contexts()
 
-            # 可選：插入 few-shot 範例（k=2），強化冷啟/語境不足回合
-            fewshot_text = ""
-            try:
-                enable_fewshot = False  # disabled to reduce prompt length and latency
-                if enable_fewshot and hasattr(self, 'example_selector'):
-                    fewshots = self.example_selector.select_examples(
-                        query=user_input, context=None, k=2, strategy="hybrid"
-                    )
-                    fs_blocks = []
-                    for i, ex in enumerate(fewshots, 1):
-                        ui = getattr(ex, 'user_input', '') or getattr(ex, 'input', '')
-                        out = getattr(ex, 'responses', None) or getattr(ex, 'output', None) or getattr(ex, 'answer', None)
-                        if isinstance(out, list) and out:
-                            out_text = str(out[0])
-                        else:
-                            out_text = str(out) if out is not None else ''
-                        fs_blocks.append(f"[範例{i}]\n護理人員: {ui}\n病患: {out_text}")
-                    if fs_blocks:
-                        fewshot_text = "\n".join(fs_blocks) + "\n"
-                        formatted_history = fewshot_text + formatted_history
-                        logger.info(f"🧩 Injected few-shot examples: {len(fs_blocks)}")
-                        self._fewshot_used = True
-            except Exception as _e:
-                logger.info(f"Few-shot injection skipped: {_e}")
+            # 簡化：不插入 few-shot 範例，降低提示長度與延遲
             
             current_call = self.unified_stats['total_unified_calls'] + 1
             logger.info(f"🚀 Unified DSPy call #{current_call} - {character_name} processing {len(conversation_history)} history entries")

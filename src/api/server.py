@@ -598,79 +598,75 @@ async def format_dialogue_response(
         logger.warning("回應中缺少 dialogue_context 鍵，使用默認值")
         response_dict["dialogue_context"] = ""
 
-    # 規範化 responses：修正 "['a','b']" 等字串化列表為真正列表，或單字串/多行轉為列表
+    # 規範化 responses：在非 optimized 實現下才執行深度規範化
     try:
-        res = response_dict.get("responses")
-        # 情況1：列表中只有一個元素，且該元素是字串形式的列表
-        if isinstance(res, list) and len(res) == 1 and isinstance(res[0], str):
-            s = res[0].strip()
-            if s.startswith('[') and s.endswith(']'):
-                parsed = None
-                try:
-                    parsed = json.loads(s)
-                except json.JSONDecodeError:
-                    import ast as _ast
+        impl = session.get("implementation_version", "original") if session else "original"
+        if impl != "optimized":
+            res = response_dict.get("responses")
+            if isinstance(res, list) and len(res) == 1 and isinstance(res[0], str):
+                s = res[0].strip()
+                if s.startswith('[') and s.endswith(']'):
+                    parsed = None
                     try:
-                        parsed = _ast.literal_eval(s)
-                    except Exception:
-                        parsed = None
-                if isinstance(parsed, list):
-                    response_dict["responses"] = [str(x) for x in parsed[:5]]
-        # 情況2：responses 本身是字串
-        elif isinstance(res, str):
-            s = res.strip()
-            if s.startswith('[') and s.endswith(']'):
-                try:
-                    parsed = json.loads(s)
+                        parsed = json.loads(s)
+                    except json.JSONDecodeError:
+                        import ast as _ast
+                        try:
+                            parsed = _ast.literal_eval(s)
+                        except Exception:
+                            parsed = None
                     if isinstance(parsed, list):
                         response_dict["responses"] = [str(x) for x in parsed[:5]]
-                except json.JSONDecodeError:
-                    import ast as _ast
+            elif isinstance(res, str):
+                s = res.strip()
+                if s.startswith('[') and s.endswith(']'):
                     try:
-                        parsed = _ast.literal_eval(s)
+                        parsed = json.loads(s)
                         if isinstance(parsed, list):
                             response_dict["responses"] = [str(x) for x in parsed[:5]]
-                    except Exception:
-                        pass
+                    except json.JSONDecodeError:
+                        import ast as _ast
+                        try:
+                            parsed = _ast.literal_eval(s)
+                            if isinstance(parsed, list):
+                                response_dict["responses"] = [str(x) for x in parsed[:5]]
+                        except Exception:
+                            pass
+                else:
+                    lines = [line.strip() for line in s.split('\n') if line.strip()]
+                    if lines:
+                        response_dict["responses"] = lines[:5]
+            if not isinstance(response_dict.get("responses"), list):
+                response_dict["responses"] = [str(response_dict.get("responses"))] if response_dict.get("responses") is not None else []
             else:
-                # 以換行分割成多行選項
-                lines = [line.strip() for line in s.split('\n') if line.strip()]
-                if lines:
-                    response_dict["responses"] = lines[:5]
-        # 最終保證為字串列表
-        if not isinstance(response_dict.get("responses"), list):
-            response_dict["responses"] = [str(response_dict.get("responses"))] if response_dict.get("responses") is not None else []
-        else:
-            response_dict["responses"] = [str(x) for x in response_dict["responses"]]
-
-        # 深層解析：若列表中的元素仍是字串形式的列表，進一步展開
-        expanded = []
-        for item in response_dict["responses"]:
-            text = str(item)
-            trimmed = text.strip()
-            if trimmed.startswith('['):
-                candidate = trimmed
-                if not trimmed.endswith(']'):
-                    closing = trimmed.rfind(']')
-                    if closing != -1:
-                        candidate = trimmed[:closing + 1]
-                try:
-                    parsed = json.loads(candidate)
-                except json.JSONDecodeError:
-                    import ast as _ast
+                response_dict["responses"] = [str(x) for x in response_dict["responses"]]
+            expanded = []
+            for item in response_dict["responses"]:
+                text = str(item)
+                trimmed = text.strip()
+                if trimmed.startswith('['):
+                    candidate = trimmed
+                    if not trimmed.endswith(']'):
+                        closing = trimmed.rfind(']')
+                        if closing != -1:
+                            candidate = trimmed[:closing + 1]
                     try:
-                        parsed = _ast.literal_eval(candidate)
-                    except Exception:
-                        parsed = None
-                if isinstance(parsed, list):
-                    expanded.extend(str(x) for x in parsed)
-                    remainder = trimmed[len(candidate):].strip()
-                    if remainder:
-                        expanded.append(remainder)
-                    continue
-            expanded.append(text)
-        if expanded:
-            response_dict["responses"] = expanded[:5]
+                        parsed = json.loads(candidate)
+                    except json.JSONDecodeError:
+                        import ast as _ast
+                        try:
+                            parsed = _ast.literal_eval(candidate)
+                        except Exception:
+                            parsed = None
+                    if isinstance(parsed, list):
+                        expanded.extend(str(x) for x in parsed)
+                        remainder = trimmed[len(candidate):].strip()
+                        if remainder:
+                            expanded.append(remainder)
+                        continue
+                expanded.append(text)
+            if expanded:
+                response_dict["responses"] = expanded[:5]
     except Exception as _e:
         logger.warning(f"規範化 responses 失敗: {_e}")
     
