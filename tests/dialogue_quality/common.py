@@ -3,9 +3,28 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+import random
 
 DEFAULT_BASE_URL = "http://localhost:8000"
-DEFAULT_CHARACTER_ID = "1"
+
+# Available test characters (aligned with src/ui/client.py system_testing_config)
+AVAILABLE_TEST_CHARACTER_IDS: List[str] = ["1", "2", "3", "4", "5", "6"]
+
+# Randomly choose one persona per test run
+DEFAULT_CHARACTER_ID = random.choice(AVAILABLE_TEST_CHARACTER_IDS)
+
+def get_character_config(character_id: str):
+    """Return the structured character_config for the given id.
+
+    Uses src.ui.client.system_testing_config as the single source of truth so
+    tests and UI share identical persona definitions.
+    """
+    try:
+        from src.ui.client import system_testing_config  # lazy import
+        return system_testing_config(str(character_id))
+    except Exception:
+        # If anything fails, let server fall back to default Patient_{id}
+        return None
 
 SELF_INTRO_PATTERNS = [
     "我是Patient",
