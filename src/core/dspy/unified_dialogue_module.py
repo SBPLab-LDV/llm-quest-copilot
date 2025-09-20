@@ -9,6 +9,7 @@
 import dspy
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
@@ -618,24 +619,45 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         if not conversation_history:
             return reminder
 
+        # 允許透過環境變數 DSPY_MAX_HISTORY 動態調整歷史視窗（預設 3）
         max_history = 3
+        try:
+            env_mh = int(os.getenv('DSPY_MAX_HISTORY', '3'))
+            if 1 <= env_mh <= 20:
+                max_history = env_mh
+        except Exception:
+            pass
 
-        if len(conversation_history) <= max_history:
-            trimmed = list(conversation_history)
-        else:
-            important = conversation_history[:2]
-            recent = conversation_history[-(max_history - len(important)) :]
-            combined = important + recent
-            seen = set()
-            trimmed = []
-            for item in combined:
-                if item not in seen:
-                    trimmed.append(item)
-                    seen.add(item)
+        # Plan A：直接取最近 max_history 條，並儘量同時包含護理人員與病患
+        recent = conversation_history[-max_history:]
 
+        def _is_caregiver(line: str) -> bool:
+            return isinstance(line, str) and line.strip().startswith("護理人員:")
+
+        def _is_patient(line: str) -> bool:
+            return isinstance(line, str) and (': ' in line) and (not _is_caregiver(line))
+
+        has_caregiver = any(_is_caregiver(x) for x in recent)
+        has_patient = any(_is_patient(x) for x in recent)
+        selected = list(recent)
+
+        if not (has_caregiver and has_patient):
+            # 從整段歷史中（由近至遠）補上缺失一方的最近一條
+            missing_role = 'caregiver' if not has_caregiver else 'patient'
+            for entry in reversed(conversation_history):
+                if missing_role == 'caregiver' and _is_caregiver(entry):
+                    if entry not in selected:
+                        selected = (selected + [entry])[-max_history:]
+                    break
+                if missing_role == 'patient' and _is_patient(entry):
+                    if entry not in selected:
+                        selected = (selected + [entry])[-max_history:]
+                    break
+
+        # 產生條列摘要
         summary_lines: List[str] = []
         seen_bullets: set[str] = set()
-        for entry in trimmed[-max_history:]:
+        for entry in selected:
             if not entry:
                 continue
             text = entry.strip()

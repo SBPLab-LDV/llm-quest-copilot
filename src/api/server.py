@@ -170,6 +170,55 @@ async def log_requests(request: Request, call_next):
     response = await call_next(request)
     return response
 
+# 開發用：查詢指定 session 的對話歷史（受可選令牌保護）
+@app.get("/api/dev/session/{session_id}/history")
+async def get_session_history(session_id: str, token: Optional[str] = None):
+    """取得指定 session 的對話歷史。
+
+    安全性：若環境變數 DEBUG_API_TOKEN 已設定，則必須提供相同的 token 作為查詢參數；
+    若未設定，則不檢查 token（開發環境使用）。
+    """
+    env_token = os.getenv("DEBUG_API_TOKEN")
+    if env_token and token != env_token:
+        raise HTTPException(status_code=403, detail="Forbidden: invalid token")
+
+    if session_id not in session_store:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = session_store[session_id]
+    dm = session.get("dialogue_manager")
+    if dm is None:
+        raise HTTPException(status_code=500, detail="Dialogue manager missing in session")
+
+    history = list(getattr(dm, "conversation_history", []))
+    impl = session.get("implementation_version", "unknown")
+    log_path = getattr(dm, "log_filepath", None)
+
+    return {
+        "status": "success",
+        "session_id": session_id,
+        "implementation_version": impl,
+        "conversation_history": history,
+        "log_file": log_path,
+    }
+
+# 開發用：動態調整 LM 歷史視窗大小（影響 Unified 模組的提示歷史）
+@app.post("/api/dev/config/set_max_history")
+async def set_max_history(request: dict = Body(...)):
+    """設定環境變數 DSPY_MAX_HISTORY 以控制歷史視窗（1–20）。"""
+    try:
+        value = int(request.get("max_history", 3))
+        if not (1 <= value <= 20):
+            raise HTTPException(status_code=400, detail="max_history must be between 1 and 20")
+        os.environ["DSPY_MAX_HISTORY"] = str(value)
+        logger.info(f"Set DSPY_MAX_HISTORY to {value}")
+        return {"status": "success", "DSPY_MAX_HISTORY": value}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to set max history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # 依賴注入：獲取或創建會話
 async def get_or_create_session(
     request: Request,
