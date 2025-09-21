@@ -69,8 +69,20 @@ logger = logging.getLogger(__name__)
 from ..core.dialogue_factory import create_dialogue_manager
 from ..core.character import Character
 from ..core.state import DialogueState
+from ..utils.config import load_character
 from ..utils.speech_input import SpeechInput
+from ..utils.config import load_config
 from ..core.dspy.config import DSPyConfig
+from ..core.audio.context_utils import (
+    format_history_for_audio,
+    build_available_audio_contexts,
+    summarize_character,
+    build_audio_template_rules,
+)
+from ..core.dspy.audio_modules import (
+    get_audio_prompt_composer,
+    get_audio_disfluency_module,
+)
 from ..llm.dspy_gemini_adapter import start_dspy_debug_log
 from .performance_monitor import get_performance_monitor
 from .health_monitor import get_health_monitor
@@ -207,6 +219,7 @@ async def get_session_history(session_id: str, token: Optional[str] = None):
 async def set_max_history(request: dict = Body(...)):
     """設定環境變數 DSPY_MAX_HISTORY 以控制歷史視窗（1–20）。"""
     try:
+        trace_id = ""
         value = int(request.get("max_history", 3))
         if not (1 <= value <= 20):
             raise HTTPException(status_code=400, detail="max_history must be between 1 and 20")
@@ -305,10 +318,13 @@ async def get_or_create_session(
                         logger.info("成功將 character_config 字符串解析為字典")
                     except json.JSONDecodeError as e:
                         logger.error(f"解析 character_config 字符串失敗: {e}")
-                        # 使用預設值創建
-                        character = create_default_character(character_id)
-                        character_cache[character_id] = character
-                        return session_store[new_session_id]
+                        # 解析失敗則改為從 characters.yaml 載入，失敗再回退預設
+                        try:
+                            character = load_character(character_id)
+                            logger.info(f"已從配置載入角色: {character.name}")
+                        except Exception as le:
+                            logger.warning(f"從配置載入角色失敗，使用預設: {le}")
+                            character = create_default_character(character_id)
                 
                 logger.debug(f"配置內容: {json.dumps(character_config, ensure_ascii=False, indent=2)}")
                 
@@ -329,11 +345,21 @@ async def get_or_create_session(
                 logger.debug(f"成功使用客戶端配置創建角色: {character.name}")
             except Exception as e:
                 logger.error(f"使用客戶端配置創建角色失敗: {e}", exc_info=True)
-                # 使用預設值創建
-                character = create_default_character(character_id)
+                # 嘗試從配置載入，失敗再回退預設
+                try:
+                    character = load_character(character_id)
+                    logger.info(f"已從配置載入角色: {character.name}")
+                except Exception as le:
+                    logger.warning(f"從配置載入角色失敗，使用預設: {le}")
+                    character = create_default_character(character_id)
         else:
-            # 使用預設值創建
-            character = create_default_character(character_id)
+            # 未提供客戶端配置 -> 先嘗試從 characters.yaml 載入
+            try:
+                character = load_character(character_id)
+                logger.info(f"已從配置載入角色: {character.name}")
+            except Exception as le:
+                logger.warning(f"從配置載入角色失敗，使用預設: {le}")
+                character = create_default_character(character_id)
         
         character_cache[character_id] = character
     
@@ -403,7 +429,12 @@ def create_default_character(character_id: str) -> Character:
     )
 
 # 語音轉文本函數
-async def speech_to_text(audio_file: UploadFile) -> Dict[str, Any]:
+async def speech_to_text(
+    audio_file: UploadFile,
+    *,
+    dialogue_manager: Optional[Any] = None,
+    session_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """將上傳的音頻文件轉換為文本，並提供多個可能的完整句子選項
 
     Args:
@@ -415,6 +446,7 @@ async def speech_to_text(audio_file: UploadFile) -> Dict[str, Any]:
     logger.debug(f"開始處理音頻文件: {audio_file.filename}")
     
     temp_files = []  # 追蹤需要刪除的臨時文件
+    trace_id = ""
     
     try:
         # 保存上傳的文件
@@ -430,78 +462,121 @@ async def speech_to_text(audio_file: UploadFile) -> Dict[str, Any]:
         # 導入音頻處理工具
         from ..utils.audio_processor import check_audio_format, preprocess_audio
         
-        # 檢查音頻格式
-        if not check_audio_format(original_audio_path):
-            logger.warning(f"上傳的音頻格式無效或不是WAV格式: {original_audio_path}")
-            return {
-                "original": "音頻格式無效",
-                "options": ["您好，上傳的音頻格式無效。請使用WAV格式錄音。"]
-            }
+        # 檢查音頻格式：若非 WAV，嘗試直接送交 Gemini（不再直接拒絕）
+        is_wav = check_audio_format(original_audio_path)
         
         # 預處理音頻以優化識別
         processed_audio_path = f"processed_audio_{uuid.uuid4()}.wav"
         temp_files.append(processed_audio_path)
         
-        processed_audio_path = preprocess_audio(
-            input_file=original_audio_path,
-            output_file=processed_audio_path
-        )
+        if is_wav:
+            processed_audio_path = preprocess_audio(
+                input_file=original_audio_path,
+                output_file=processed_audio_path
+            )
+        else:
+            # 直接使用原始檔，讓 Gemini 嘗試處理（支援 mp3/其他格式時可成功）
+            logger.warning("非 WAV 檔案，跳過本地預處理，直接送交 Gemini：%s", original_audio_path)
+            processed_audio_path = original_audio_path
         logger.debug(f"音頻預處理完成: {processed_audio_path}")
         
         # 使用 GeminiClient 進行語音識別
         try:
             from ..llm.gemini_client import GeminiClient
             import json
-            
-            # 初始化 GeminiClient
+
+            cfg = load_config()
+            audio_cfg = cfg.get('audio', {}) if isinstance(cfg, dict) else {}
+            use_ctx = bool(audio_cfg.get('use_context', False))
+            # 依請求上下文決定是否注入角色與歷史
+            character_obj = getattr(dialogue_manager, 'character', None) if (use_ctx and dialogue_manager) else None
+            history_list = getattr(dialogue_manager, 'conversation_history', None) if (use_ctx and dialogue_manager) else None
+
             gemini_client = GeminiClient()
-            
-            # 調用音頻識別方法，使用處理後的音頻
             logger.info(f"使用 Gemini 進行音頻識別: {processed_audio_path}")
-            transcription_json = gemini_client.transcribe_audio(processed_audio_path)
-            
-            # 解析識別結果 JSON
+
+            import uuid as _uuid
+            trace_id = str(_uuid.uuid4())
+
+            try:
+                transcription_json = gemini_client.transcribe_audio(
+                    processed_audio_path,
+                    character=character_obj if use_ctx else None,
+                    conversation_history=history_list if use_ctx else None,
+                    session_id=session_id,
+                    trace_id=trace_id,
+                )
+            except Exception:
+                transcription_json = gemini_client.transcribe_audio(processed_audio_path)
+
             try:
                 result = json.loads(transcription_json)
-                
-                # 提取原始識別和選項
+
                 original = result.get("original", "")
                 options = result.get("options", [])
-                
+
                 logger.info(f"音頻識別成功: 原始='{original}', 選項數={len(options)}")
-                
-                # 檢查識別結果
+
                 if not original or original.startswith("無法識別") or original.startswith("音頻識別過程中發生錯誤"):
                     logger.warning(f"音頻識別失敗或沒有識別出有效內容: {original}")
-                    # 使用一個友好的回退消息
                     return {
                         "original": original,
                         "options": ["您好，我沒能清楚聽到您的問題。請問您能再說一次嗎？"]
                     }
-                
-                # 如果沒有生成選項或選項數量太少，則使用原始識別作為選項
+
                 if not options or len(options) < 1:
                     options = [original]
-                
-                # 返回識別結果
+
+                character_profile = summarize_character(character_obj)
+                history_text = format_history_for_audio(
+                    history_list,
+                    getattr(character_obj, 'name', None) if character_obj else None,
+                    getattr(character_obj, 'persona', None) if character_obj else None,
+                )
+
+                if audio_cfg.get('dspy', {}).get('normalize', False):
+                    try:
+                        disfluency_module = get_audio_disfluency_module()
+                        normalized = disfluency_module.normalize(
+                            system_prompt=getattr(gemini_client, 'last_audio_system_prompt', getattr(gemini_client, 'last_audio_prompt', "")),
+                            user_prompt=getattr(gemini_client, 'last_audio_user_prompt', ""),
+                            conversation_history=history_text,
+                            raw_transcription=transcription_json,
+                            trace_id=trace_id,
+                        )
+                        normalized_json = normalized.get('normalized_json', transcription_json)
+                        normalized_result = json.loads(normalized_json)
+                        original = normalized_result.get('original', original)
+                        options = normalized_result.get('options', options)
+                    except Exception as norm_error:
+                        logger.warning(
+                            "DSPy audio normalize 失敗: trace_id=%s err=%s",
+                            trace_id,
+                            norm_error,
+                        )
+
                 return {
                     "original": original,
-                    "options": options
+                    "options": options,
+                    "trace_id": trace_id,
+                    "character_profile": character_profile,
+                    "history_text": history_text,
                 }
-                
+
             except json.JSONDecodeError:
                 logger.error(f"無法解析識別結果 JSON: {transcription_json}")
                 return {
                     "original": transcription_json,
-                    "options": [transcription_json]
+                    "options": [transcription_json],
+                    "trace_id": trace_id,
                 }
-            
+
         except Exception as e:
             logger.error(f"使用 Gemini 進行音頻識別時出錯: {e}", exc_info=True)
-            # 如果 Gemini 識別失敗，使用一個預設文本作為回退
             return {
                 "original": "識別失敗",
-                "options": ["您好，這是一條測試訊息。目前遇到了語音識別問題，請稍後再試或改用文字輸入。"]
+                "options": ["您好，這是一條測試訊息。目前遇到了語音識別問題，請稍後再試或改用文字輸入。"],
+                "trace_id": trace_id,
             }
     
     except Exception as e:
@@ -1174,8 +1249,12 @@ async def process_audio_dialogue(
                 detail=f"創建會話失敗: {str(e)}"
             )
     
-    # 語音轉文本
-    text_result = await speech_to_text(audio_file)
+    # 語音轉文本（傳入當前會話以便注入角色與歷史）
+    text_result = await speech_to_text(
+        audio_file,
+        dialogue_manager=session["dialogue_manager"],
+        session_id=session_id,
+    )
     logger.debug(f"音頻識別結果: {text_result}")
     
     # 處理返回結果（可能是字典或JSON字符串）
@@ -1209,7 +1288,7 @@ async def process_audio_dialogue(
     logger.info(f"原始識別文本: '{original_text}'")
     logger.info(f"識別選項 ({len(options_list)}): {options_list}")
     
-    # 將語音識別選項和狀態保存在DialogueManager中，供選擇回應時使用
+    # 將語音識別選項和狀態保存在 DialogueManager 中，供選擇回應時使用
     dialogue_manager = session["dialogue_manager"]
     if not hasattr(dialogue_manager, 'last_speech_options'):
         dialogue_manager.last_speech_options = []
@@ -1219,8 +1298,15 @@ async def process_audio_dialogue(
         dialogue_manager.last_response_state = ""
     dialogue_manager.last_response_state = "WAITING_SELECTION"
     
-    # 記錄到對話歷史，添加標記以便識別
-    dialogue_manager.conversation_history.append("[系統]: 請從語音識別選項中選擇")
+    # 僅儲存「病患自己的話」到對話歷史：將原始識別文本作為病患發言
+    try:
+        patient_name = getattr(dialogue_manager.character, 'name', '病患')
+        orig = (original_text or '').strip()
+        if orig and not orig.startswith("無法識別") and orig != "識別失敗":
+            dialogue_manager.conversation_history.append(f"{patient_name}: {orig}")
+    except Exception:
+        # 若歷史寫入失敗則忽略，不影響主流程
+        pass
     
     # 獲取實現版本信息
     implementation_version = "original"
