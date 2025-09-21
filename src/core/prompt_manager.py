@@ -129,3 +129,27 @@ class PromptManager:
             player_input=player_input,
             response=response
         )
+
+    def get_audio_prompt(self,
+                         character: Optional[Character] = None,
+                         conversation_history: Optional[List[str]] = None) -> str:
+        """Legacy audio prompt generator (non-DSPy)."""
+        template = self.templates.get('audio_disfluency', '')
+        if not character and not conversation_history:
+            return template
+        sections = []
+        if character:
+            fixed = character.details.get('fixed_settings', {}) if character.details else {}
+            name = fixed.get('姓名') or character.name
+            diagnosis = fixed.get('目前診斷') or ''
+            persona = character.persona
+            summary = f"姓名: {name}"
+            if diagnosis:
+                summary += f" / 診斷: {diagnosis}"
+            summary += f" / Persona: {persona}"
+            sections.append(summary)
+        if conversation_history:
+            sections.extend(conversation_history[-5:])
+        if sections:
+            return template + "\n\n" + "\n".join(sections)
+        return template

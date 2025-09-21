@@ -99,7 +99,7 @@ class ExampleRetrievalSignature(dspy.Signature):
 
 class DialogueConsistencySignature(dspy.Signature):
     """對話一致性檢查簽名
-    
+
     用於確保對話回應與角色設定和歷史保持一致。
     """
     
@@ -112,6 +112,19 @@ class DialogueConsistencySignature(dspy.Signature):
     is_consistent = dspy.OutputField(desc="回應是否與角色和歷史一致")
     consistency_score = dspy.OutputField(desc="一致性評分，0.0到1.0之間")
     inconsistency_details = dspy.OutputField(desc="如果不一致，說明具體的不一致之處")
+
+
+class AudioDisfluencyChatSignature(dspy.Signature):
+    """語音任務 system/user prompt 組裝簽名。"""
+
+    character_profile = dspy.InputField(desc="角色摘要（姓名/診斷/目標）")
+    conversation_history = dspy.InputField(desc="近期對話歷史（含角色提醒）")
+    available_contexts = dspy.InputField(desc="可用情境清單")
+    template_rules = dspy.InputField(desc="輸出格式與禁止事項說明")
+    option_count = dspy.InputField(desc="預期產生的選項數")
+
+    system_prompt = dspy.OutputField(desc="最終 system prompt 內容")
+    user_prompt = dspy.OutputField(desc="最終 user prompt 內容")
 
 # 工具函數：簽名驗證和測試
 def validate_signature_output(signature_class, output_data: Dict[str, Any]) -> bool:
@@ -180,7 +193,8 @@ AVAILABLE_SIGNATURES = {
     'response_evaluation': ResponseEvaluationSignature,
     'state_transition': StateTransitionSignature,
     'example_retrieval': ExampleRetrievalSignature,
-    'dialogue_consistency': DialogueConsistencySignature
+    'dialogue_consistency': DialogueConsistencySignature,
+    'audio_disfluency_chat': AudioDisfluencyChatSignature,
 }
 
 def get_all_signature_info() -> Dict[str, Dict[str, Any]]:

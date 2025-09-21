@@ -4,6 +4,16 @@ import logging
 import os
 import base64
 import json
+import hashlib
+
+from ..core.audio.context_utils import (
+    format_history_for_audio,
+    build_available_audio_contexts,
+    summarize_character,
+    build_audio_template_rules,
+)
+from ..core.dspy.audio_modules import get_audio_prompt_composer
+from typing import Optional
 
 class GeminiClient:
     def __init__(self):
@@ -13,7 +23,33 @@ class GeminiClient:
         # Create a multimodal model instance for audio processing
         self.multimodal_model = genai.GenerativeModel('gemini-2.0-flash-exp')
         self.logger = logging.getLogger(__name__)
+        self.logging_cfg = config.get('logging', {}) or {}
+        self.audio_cfg = config.get('audio', {}) or {}
+        self._prompt_manager = None
+        self._last_audio_prompt: Optional[str] = None
+        self._last_audio_system_prompt: Optional[str] = None
+        self._last_audio_user_prompt: Optional[str] = None
+        self._last_audio_template_rules: Optional[str] = None
+        self._last_audio_raw: Optional[str] = None
+        self._last_audio_clean: Optional[str] = None
+        self._last_trace_id: Optional[str] = None
+        # Diagnostics
+        self._last_audio_used_dspy: bool = False
+        self._last_audio_signature: Optional[str] = None
         
+    def _infer_mime_type(self, path: str) -> str:
+        try:
+            ext = os.path.splitext(path)[1].lower()
+        except Exception:
+            ext = ''
+        return {
+            '.wav': 'audio/wav',
+            '.mp3': 'audio/mpeg',
+            '.flac': 'audio/flac',
+            '.ogg': 'audio/ogg',
+            '.m4a': 'audio/mp4',
+        }.get(ext, 'audio/wav')
+
     def generate_response(self, prompt: str) -> str:
         """生成回應並確保格式正確"""
         try:
@@ -84,37 +120,36 @@ class GeminiClient:
             }
             return json.dumps(error_payload, ensure_ascii=False)
     
-    def transcribe_audio(self, audio_file_path: str) -> str:
-        """將音頻文件轉換為文本，同時處理斷斷續續的語音並提供多個可能的完整句子選項
-        
-        Args:
-            audio_file_path: 音頻文件路徑 (WAV格式)
-            
-        Returns:
-            識別結果的 JSON 字符串，包含原始轉錄和多個可能完整句子選項
-        """
+    def transcribe_audio(self, audio_file_path: str,
+                         character: object = None,
+                         conversation_history: object = None,
+                         session_id: str = None,
+                         trace_id: str = None) -> str:
+        """將音頻文件轉換為文本，回傳標準 JSON 字串。"""
         try:
-            self.logger.info(f"===== 開始音頻轉文本 =====")
+            self.logger.info("===== 開始音頻轉文本 =====")
             self.logger.info(f"音頻文件: {audio_file_path}")
-            
-            # 檢查文件是否存在
+
             if not os.path.exists(audio_file_path):
                 self.logger.error(f"音頻文件不存在: {audio_file_path}")
                 return json.dumps({
                     "original": "無法處理音頻文件：文件不存在",
                     "options": ["無法處理音頻文件：文件不存在"]
                 })
-            
-            # 讀取音頻文件
+
             try:
                 with open(audio_file_path, "rb") as f:
                     audio_data = f.read()
-                
-                file_size = len(audio_data) / 1024  # KB
+                file_size = len(audio_data) / 1024
                 self.logger.debug(f"音頻文件大小: {file_size:.2f} KB")
-                
-                # 檢查文件大小，Gemini API 可能有限制
-                if file_size > 10 * 1024:  # 10 MB
+                try:
+                    sha = hashlib.sha256(audio_data).hexdigest()[:8]
+                    self.logger.info(
+                        f"Audio meta: size_kb={file_size:.2f}, sha256_8={sha}, session_id={session_id or ''}, trace_id={trace_id or ''}"
+                    )
+                except Exception:
+                    pass
+                if file_size > 10 * 1024:
                     self.logger.warning(f"音頻文件過大 ({file_size:.2f} KB)，可能超過 API 限制")
             except Exception as e:
                 self.logger.error(f"讀取音頻文件失敗: {e}", exc_info=True)
@@ -122,150 +157,212 @@ class GeminiClient:
                     "original": "無法讀取音頻文件",
                     "options": ["無法讀取音頻文件"]
                 })
-            
-            # 構建專門處理病患斷斷續續語音的提示詞
-            prompt = """
-            請仔細聆聽這段錄音。這是一位口腔癌住院病患的語音，請根據以下醫療情境和病患特殊狀況進行分析：
 
-            **病患醫療背景：**
-            - 口腔癌患者，可能接受過手術、化療或放射治療
-            - 可能有口腔潰瘍、黏膜炎、張口困難等副作用
-            - 發音器官（舌頭、牙齒、嘴唇、軟顎）可能受損
-            - 可能裝有鼻胃管、氣切管或其他維生設備
-            - 正在住院治療中，處於醫療監護環境
+            option_count = int(self.audio_cfg.get('option_count', 4) or 4)
+            prompt_via_dspy = bool(self.audio_cfg.get('prompt_via_dspy', False))
+            use_context = bool(self.audio_cfg.get('use_context', False))
 
-            **語音表達特點：**
-            - 咬字不清、發音模糊（特別是需要舌頭或嘴唇配合的音）
-            - 可能有漏風音、鼻音過重或氣音
-            - 說話速度較慢，經常停頓休息
-            - 可能因疼痛而中斷說話
-            - 音量較小或時強時弱
+            # Diagnostics: log audio configuration
+            self.logger.info(
+                "[AudioCfg] prompt_via_dspy=%s, use_context=%s, option_count=%s",
+                prompt_via_dspy, use_context, option_count,
+            )
 
-            **住院情境下具體需求推測指南：**
-            當聽到關鍵詞時，請推測具體的完整句子：
+            character_profile = summarize_character(character) if character else ""
+            history_text = ""
+            if use_context and conversation_history is not None:
+                try:
+                    history_text = format_history_for_audio(
+                        conversation_history,
+                        getattr(character, 'name', None) if character else None,
+                        getattr(character, 'persona', None) if character else None,
+                    )
+                except Exception:
+                    history_text = ""
+            available_contexts = build_available_audio_contexts() if use_context else ""
+            template_rules = build_audio_template_rules(option_count)
 
-            1. **疼痛相關：**
-               - "痛" → "我嘴巴很痛，需要止痛藥" / "我頭很痛，可以幫我調整枕頭嗎" / "我傷口很痛，請護士來看一下"
-               - "不舒服" → "我覺得噁心想吐" / "我胸口悶悶的不舒服" / "我躺著不舒服，想要坐起來"
+            self._last_trace_id = trace_id
+            self._last_audio_template_rules = template_rules
 
-            2. **飲食相關：**
-               - "餓" / "吃" → "我餓了，什麼時候可以吃流質食物" / "我想吃點冰淇淋舒緩口腔" / "我可以吃軟質食物嗎"
-               - "水" / "喝" → "我想喝溫開水潤喉" / "我嘴巴很乾，可以用濕棉棒嗎" / "我想喝點果汁"
-
-            3. **生理需求：**
-               - "尿" / "廁所" → "我需要小便，請幫我拿尿壺" / "我想上大號，需要人扶我去廁所" / "我尿急，請快點幫忙"
-               - "洗" → "我想刷牙清潔口腔" / "我想洗臉擦身體" / "我想漱口去除異味"
-
-            4. **醫療照護：**
-               - "護士" / "醫生" → "請叫護士來幫我換藥" / "我想問醫生什麼時候可以出院" / "護士，我的點滴好像有問題"
-               - "藥" → "我需要吃止痛藥了" / "我忘記吃血壓藥了" / "這個藥讓我想吐"
-
-            5. **情緒支持：**
-               - "怕" → "我很怕開刀會不會有後遺症" / "我擔心家裡的小孩沒人照顧" / "我害怕治療效果不好"
-               - "家人" → "我想打電話給我老婆" / "我的小孩什麼時候來看我" / "請幫我聯絡我兒子"
-
-            6. **環境調節：**
-               - "冷" / "熱" → "我覺得很冷，可以再蓋一條被子嗎" / "冷氣太強了，請調高一點溫度"
-               - "吵" → "隔壁病床太吵了，我睡不著" / "外面施工聲音太大，可以關窗戶嗎"
-
-            **重要原則：**
-            1. 避免產生模糊不清的句子（如僅"我想吃"、"我要"、"幫我"）
-            2. 必須包含具體的行動、物品或情境描述
-            3. 考慮口腔癌病患的實際限制和需求
-            4. 結合住院環境的實際情況
-            5. 優先考慮醫療相關的具體需求
-
-            **輸出格式要求：**
-            請返回標準JSON格式，包含：
-            - "original": 原始錄音內容的忠實記錄
-            - "options": 4個具體完整的句子，每個都包含明確的情境和需求
-
-            **正確範例：**
-            {"original": "我...想...吃[含糊]...", "options": ["我想吃點冰淇淋舒緩口腔疼痛", "我想吃流質食物，肚子餓了", "我想吃點軟質的粥或湯", "我想吃藥，忘記吃止痛藥了"]}
-
-            **錯誤範例（避免）：**
-            {"original": "我...想...吃[含糊]...", "options": ["我想吃", "我要吃東西", "給我食物"]}
-
-            請直接返回JSON格式，不要包含任何markdown標記或額外解釋。
-            如果完全無法識別，請返回：{"original": "無法識別", "options": ["建議重新錄音或請護理人員協助確認需求"]}
-            """
-            
-            # 按照 genai 庫要求的格式準備多模態內容
-            content = {
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inline_data": {
-                            "mime_type": "audio/wav",
-                            "data": base64.b64encode(audio_data).decode('utf-8')
+            if prompt_via_dspy:
+                composer = get_audio_prompt_composer()
+                # Diagnostics: record and log signature/inputs presence
+                sig_name = None
+                try:
+                    sig_name = getattr(composer, 'signature').__name__  # type: ignore[attr-defined]
+                except Exception:
+                    sig_name = str(getattr(composer, 'signature', 'unknown'))
+                self._last_audio_used_dspy = True
+                self._last_audio_signature = sig_name
+                self.logger.info(
+                    "[DSPy] Using AudioPromptComposerModule (Signature=%s) | profile_len=%s, history_len=%s, contexts_len=%s, rules_len=%s",
+                    sig_name,
+                    len(character_profile or ""),
+                    len(history_text or ""),
+                    len(available_contexts or ""),
+                    len(template_rules or ""),
+                )
+                prediction = composer(
+                    character_profile=character_profile,
+                    conversation_history=history_text,
+                    available_contexts=available_contexts,
+                    template_rules=template_rules,
+                    option_count=option_count,
+                )
+                system_prompt = getattr(prediction, 'system_prompt', '')
+                user_prompt = getattr(prediction, 'user_prompt', '')
+                self.logger.info(
+                    "[DSPy] Composer output lengths | system=%s chars, user=%s chars",
+                    len(system_prompt or ""), len(user_prompt or "")
+                )
+                combined_prompt = "\n\n".join([p for p in [system_prompt, user_prompt] if p]).strip()
+                self._last_audio_system_prompt = system_prompt
+                self._last_audio_user_prompt = user_prompt
+                self._last_audio_prompt = combined_prompt
+                if self.logging_cfg.get('llm_raw', False):
+                    max_len = int(self.logging_cfg.get('max_chars', 8000))
+                    prefix = ''
+                    if session_id or trace_id:
+                        prefix = f"[session={session_id or ''} trace={trace_id or ''}] "
+                    self.logger.info(f"{prefix}LM IN (audio/system): {system_prompt[:max_len]}")
+                    self.logger.info(f"{prefix}LM IN (audio/user): {user_prompt[:max_len]}")
+                mime_type = self._infer_mime_type(audio_file_path)
+                content = {
+                    "parts": [
+                        {"text": system_prompt},
+                        {"text": user_prompt},
+                        {
+                            "inline_data": {
+                                "mime_type": mime_type,
+                                "data": base64.b64encode(audio_data).decode('utf-8')
+                            }
                         }
-                    }
-                ]
-            }
-            
-            # 設定生成參數
+                    ]
+                }
+            else:
+                self._last_audio_used_dspy = False
+                self._last_audio_signature = None
+                self.logger.info("[DSPy] Skipped (prompt_via_dspy=false). Using legacy PromptManager audio prompt.")
+                if self._prompt_manager is None:
+                    from ..core.prompt_manager import PromptManager
+                    self._prompt_manager = PromptManager()
+                legacy_prompt = self._prompt_manager.get_audio_prompt(
+                    character if use_context else None,
+                    conversation_history if use_context else None,
+                )
+                self._last_audio_prompt = legacy_prompt
+                self._last_audio_system_prompt = legacy_prompt
+                self._last_audio_user_prompt = ""
+                if self.logging_cfg.get('llm_raw', False):
+                    max_len = int(self.logging_cfg.get('max_chars', 8000))
+                    prefix = ''
+                    if session_id or trace_id:
+                        prefix = f"[session={session_id or ''} trace={trace_id or ''}] "
+                    self.logger.info(f"{prefix}LM IN (audio): {legacy_prompt[:max_len]}")
+                mime_type = self._infer_mime_type(audio_file_path)
+                content = {
+                    "parts": [
+                        {"text": legacy_prompt},
+                        {
+                            "inline_data": {
+                                "mime_type": mime_type,
+                                "data": base64.b64encode(audio_data).decode('utf-8')
+                            }
+                        }
+                    ]
+                }
+
             generation_config = {
-                "temperature": 0.4,  # 稍微提高溫度以允許多樣化的推測
+                "temperature": 0.4,
                 "top_p": 0.95,
                 "top_k": 40,
                 "max_output_tokens": 1024,
             }
-            
-            self.logger.info(f"調用 Gemini 多模態 API 進行音頻識別")
-            
-            # 調用 API
+
+            self.logger.info("調用 Gemini 多模態 API 進行音頻識別")
             response = self.multimodal_model.generate_content(
                 content,
                 generation_config=generation_config
             )
-            
-            # 處理回應
+
             result_text = response.text.strip()
-            self.logger.info(f"===== 音頻識別完成 =====")
-            self.logger.debug(f"識別結果: '{result_text[:100]}...'")
-            
-            # 清理結果文本中可能包含的markdown代碼塊標記
-            # 移除可能的代碼塊標記 ```json 和 ```
+            self._last_audio_raw = result_text
+            self.logger.info("===== 音頻識別完成 =====")
+            try:
+                if self.logging_cfg.get('llm_raw', False):
+                    max_len = int(self.logging_cfg.get('max_chars', 8000))
+                    prefix = ''
+                    if session_id or trace_id:
+                        prefix = f"[session={session_id or ''} trace={trace_id or ''}] "
+                    self.logger.info(f"{prefix}LM OUT (audio/raw): {result_text[:max_len]}")
+                else:
+                    self.logger.debug(f"識別結果: '{result_text[:100]}...'")
+            except Exception:
+                pass
+
             cleaned_text = result_text
             if cleaned_text.startswith('```json'):
                 cleaned_text = cleaned_text[7:]
             if cleaned_text.endswith('```'):
                 cleaned_text = cleaned_text[:-3]
             cleaned_text = cleaned_text.strip()
-            
-            # 驗證 JSON 格式
+
             try:
-                # 嘗試解析回應為 JSON
                 json_result = json.loads(cleaned_text)
-                
-                # 確保有必要的字段
                 if "original" not in json_result or "options" not in json_result:
                     self.logger.warning(f"回應缺少必要字段: {json_result}")
-                    # 構造格式正確的回應
-                    if "original" in json_result and isinstance(json_result["original"], str):
-                        original = json_result["original"]
-                    else:
-                        original = result_text
-                    
+                    original = json_result.get('original', result_text)
                     return json.dumps({
                         "original": original,
                         "options": [original]
                     })
-                
-                # 格式正確，返回格式化的 JSON 字符串
-                return json.dumps(json_result)
+                self._last_audio_clean = json.dumps(json_result)
+                if self.logging_cfg.get('llm_raw', False):
+                    max_len = int(self.logging_cfg.get('max_chars', 8000))
+                    prefix = ''
+                    if session_id or trace_id:
+                        prefix = f"[session={session_id or ''} trace={trace_id or ''}] "
+                    self.logger.info(f"{prefix}LM OUT (audio/clean): {self._last_audio_clean[:max_len]}")
+                return self._last_audio_clean
             except json.JSONDecodeError:
-                # 不是 JSON 格式，將其轉換為正確的格式
                 self.logger.warning(f"回應不是 JSON 格式: {result_text}")
                 return json.dumps({
                     "original": result_text,
                     "options": [result_text]
                 })
-            
+
         except Exception as e:
             self.logger.error(f"音頻識別失敗: {e}", exc_info=True)
-            # 返回格式正確的錯誤 JSON
             return json.dumps({
                 "original": "音頻識別過程中發生錯誤",
                 "options": ["音頻識別過程中發生錯誤，請重試"]
             })
+
+    @property
+    def last_audio_prompt(self) -> Optional[str]:
+        return self._last_audio_prompt
+
+    @property
+    def last_audio_system_prompt(self) -> Optional[str]:
+        return self._last_audio_system_prompt
+
+    @property
+    def last_audio_user_prompt(self) -> Optional[str]:
+        return self._last_audio_user_prompt
+
+    @property
+    def last_audio_template_rules(self) -> Optional[str]:
+        return self._last_audio_template_rules
+
+    @property
+    def last_audio_raw(self) -> Optional[str]:
+        return self._last_audio_raw
+
+    @property
+    def last_audio_clean(self) -> Optional[str]:
+        return self._last_audio_clean
+
+    @property
+    def last_trace_id(self) -> Optional[str]:
+        return self._last_trace_id
