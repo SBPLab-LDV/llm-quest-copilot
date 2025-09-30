@@ -16,3 +16,7 @@ ui_debug.log
 recordings/
 third_party/
 markitdown/
+
+# Audio assets (avoid committing mp3)
+*.mp3
+assets/*.mp3
