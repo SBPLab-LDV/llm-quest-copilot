@@ -132,6 +132,7 @@ class DialogueResponse(BaseModel):
     implementation_version: Optional[str] = None  # Phase 5: 實現版本標記
     performance_metrics: Optional[Dict[str, Any]] = None  # Phase 5: 性能指標
     processing_info: Optional[Dict[str, Any]] = None  # Unified/consistency摘要（可選）
+    logs: Optional[Dict[str, Any]] = None  # 當前會話的日誌路徑（chat_gui / dspy_debug）
 
 class SelectResponseRequest(BaseModel):
     """選擇回應請求模型"""
@@ -369,9 +370,10 @@ async def get_or_create_session(
     
     # 創建對話管理器
     try:
-        dialogue_manager, implementation_version = create_dialogue_manager_with_monitoring(
+        dialogue_manager, implementation_version, debug_log_path = create_dialogue_manager_with_monitoring(
             character=character_cache[character_id],
-            log_dir="logs/api"
+            log_dir="logs/api",
+            session_id=new_session_id,
         )
     except Exception as e:
         logger.error(f"創建對話管理器失敗: {e}", exc_info=True)
@@ -387,6 +389,10 @@ async def get_or_create_session(
         "implementation_version": implementation_version,  # Phase 5: 記錄實現版本
         "created_at": asyncio.get_event_loop().time(),
         "last_activity": asyncio.get_event_loop().time(),
+        "logs": {
+            "chat_gui": getattr(dialogue_manager, 'log_filepath', None),
+            "dspy_debug": str(debug_log_path) if debug_log_path else None,
+        },
     }
     
     return session_store[new_session_id]
@@ -782,7 +788,8 @@ async def format_dialogue_response(
             speech_recognition_options=response_dict.get("speech_recognition_options", None),
             implementation_version=implementation_version,  # Phase 5: 版本信息
             performance_metrics=metrics_dict,  # Phase 5: 性能指標
-            processing_info=response_dict.get("processing_info")
+            processing_info=response_dict.get("processing_info"),
+            logs=(session or {}).get("logs") if session else None,
         )
         return response
     except Exception as e:
@@ -799,7 +806,7 @@ async def format_dialogue_response(
         )
 
 # 添加一個新函數創建對話管理器，並添加詳細日誌記錄
-def create_dialogue_manager_with_monitoring(character: Character, log_dir: str = "logs/api") -> tuple:
+def create_dialogue_manager_with_monitoring(character: Character, log_dir: str = "logs/api", session_id: Optional[str] = None) -> tuple:
     """創建對話管理器並返回實現版本信息
     
     Args:
@@ -810,12 +817,20 @@ def create_dialogue_manager_with_monitoring(character: Character, log_dir: str =
         (DialogueManager 實例, 實現版本字符串)
     """
     logger.debug(f"創建對話管理器，角色: {character.name}, 類型: {type(character)}")
-    log_path = start_dspy_debug_log(tag=character.name)
+    # 使用 session 短ID 讓 dspy_debug 與 chat_gui 一一對應
+    sess_short = (session_id or "")[:8] if session_id else ""
+    tag = character.name if not sess_short else f"{character.name}_sess_{sess_short}"
+    log_path = start_dspy_debug_log(tag=tag)
     if log_path:
         logger.info(f"已建立新的 DSPy 除錯日誌: {log_path}")
     try:
-        # 使用工廠函數創建對話管理器
-        manager = create_dialogue_manager(character, use_terminal=False, log_dir=log_dir)
+        # 使用工廠函數創建對話管理器（提供每會話專屬檔名前綴）
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime('%Y%m%d_%H%M%S')
+        base = f"{ts}_{character.name}"
+        if sess_short:
+            base = f"{base}_sess_{sess_short}"
+        manager = create_dialogue_manager(character, use_terminal=False, log_dir=log_dir, log_file_basename=base)
         
         # 檢測實現版本
         implementation_version = "original"
@@ -825,7 +840,7 @@ def create_dialogue_manager_with_monitoring(character: Character, log_dir: str =
             implementation_version = "dspy"
         
         logger.info(f"成功創建對話管理器: {type(manager).__name__} (版本: {implementation_version})")
-        return manager, implementation_version
+        return manager, implementation_version, log_path
     except Exception as e:
         logger.error(f"創建對話管理器失敗: {e}", exc_info=True)
         raise
@@ -1334,7 +1349,8 @@ async def process_audio_dialogue(
         speech_recognition_options=options_list,
         original_transcription=original_text or None,
         implementation_version=implementation_version,
-        performance_metrics=audio_metrics
+        performance_metrics=audio_metrics,
+        logs=session.get("logs") if session else None,
     )
     
     # 保存語音識別選項到交互日誌

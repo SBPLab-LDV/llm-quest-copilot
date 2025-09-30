@@ -26,7 +26,7 @@ class DialogueManagerDSPy(DialogueManager):
     但內部使用 DSPy 框架進行對話處理。
     """
     
-    def __init__(self, character: Character, use_terminal: bool = False, log_dir: str = "logs"):
+    def __init__(self, character: Character, use_terminal: bool = False, log_dir: str = "logs", log_file_basename: Optional[str] = None):
         """Initialize the DSPy DialogueManager.
         
         Args:
@@ -35,7 +35,7 @@ class DialogueManagerDSPy(DialogueManager):
             log_dir: Directory to save interaction logs
         """
         # 初始化父類，建立基本結構
-        super().__init__(character, use_terminal, log_dir)
+        super().__init__(character, use_terminal, log_dir, log_file_basename=log_file_basename)
         
         self.logger = logging.getLogger(__name__)
         self.logger.debug(f"DialogueManagerDSPy.__init__ called with DSPy backend")

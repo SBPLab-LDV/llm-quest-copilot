@@ -444,6 +444,16 @@ class DialogueApp:
                     # 記錄對話歷史和會話ID供除錯用途
                     logger.info(f"當前完整對話歷史: {history}")
                     logger.info(f"API客戶端會話ID: {self.api_client.session_id}")
+                    # 若伺服器提供會話專屬日誌路徑，保存到狀態供 Log Viewer 使用
+                    try:
+                        logs_field = response.get("logs") if isinstance(response, dict) else None
+                        if logs_field and isinstance(logs_field, dict):
+                            chat_log_path = logs_field.get("chat_gui")
+                            if chat_log_path:
+                                logger.info(f"更新 Log Viewer 路徑: {chat_log_path}")
+                                log_path_state.value = chat_log_path
+                    except Exception:
+                        pass
                     
                     # 檢查是否為 CONFUSED 狀態
                     if "state" in response and response["state"] == "CONFUSED":
@@ -529,6 +539,16 @@ class DialogueApp:
                     else:
                         history[-1][1] = "請從以下選項中選擇您想表達的內容:"
                     
+                    # 儲存伺服器提供的每會話日誌路徑（若有）
+                    try:
+                        logs_field = response.get("logs") if isinstance(response, dict) else None
+                        if logs_field and isinstance(logs_field, dict):
+                            chat_log_path = logs_field.get("chat_gui")
+                            if chat_log_path:
+                                logger.info(f"更新 Log Viewer 路徑(音頻): {chat_log_path}")
+                                log_path_state.value = chat_log_path
+                    except Exception:
+                        pass
                     # 返回選項列表給按鈕更新函數
                     return history, sess_id, options
                 else:
@@ -550,6 +570,16 @@ class DialogueApp:
                         # 處理錯誤
                         history[-1][1] = "發生錯誤，無法獲取回應。"
                     
+                    # 儲存伺服器提供的每會話日誌路徑（若有）
+                    try:
+                        logs_field = response.get("logs") if isinstance(response, dict) else None
+                        if logs_field and isinstance(logs_field, dict):
+                            chat_log_path = logs_field.get("chat_gui")
+                            if chat_log_path:
+                                logger.info(f"更新 Log Viewer 路徑(音頻一般): {chat_log_path}")
+                                log_path_state.value = chat_log_path
+                    except Exception:
+                        pass
                     # 沒有選項時返回空選項列表
                     return history, sess_id, []
                     
@@ -1040,6 +1070,8 @@ class DialogueApp:
                     current_session_display = gr.Textbox(label="目前會話ID", interactive=False)
                     current_character_display = gr.Textbox(label="目前角色", interactive=False)
                 log_file_path_display = gr.Textbox(label="日誌檔案路徑 (偵測)", interactive=False)
+                # 優先使用伺服器回傳的精確路徑（每會話專屬）
+                log_path_state = gr.State(None)
                 log_table = gr.Dataframe(
                     headers=["timestamp", "user_input", "response_options", "selected_response"],
                     datatype=["str", "str", "str", "str"],
@@ -1065,14 +1097,17 @@ class DialogueApp:
                         return str(text)
 
                 @log_function_call
-                def fetch_local_logs(char_name: str, sess_id: str | None, limit: int, mask: bool):
+                def fetch_local_logs(char_name: str, sess_id: str | None, limit: int, mask: bool, path_override: str | None):
                     """讀取本地 logs/api 的 JSON 行對話紀錄，回傳表格資料與檔案路徑。"""
                     try:
                         from datetime import datetime
                         today = datetime.now().strftime("%Y%m%d")
-                        # 嘗試優先使用今日檔案
-                        candidate = os.path.join(project_root, "logs", "api", f"{today}_patient_{char_name}_chat_gui.log")
-                        target_file = candidate if os.path.exists(candidate) else None
+                        # 優先使用伺服器提供的每會話檔案路徑
+                        target_file = path_override if (path_override and os.path.exists(path_override)) else None
+                        # 若無覆蓋，嘗試優先使用今日檔案（舊式命名）
+                        if not target_file:
+                            candidate = os.path.join(project_root, "logs", "api", f"{today}_patient_{char_name}_chat_gui.log")
+                            target_file = candidate if os.path.exists(candidate) else None
 
                         if not target_file:
                             # 回退：尋找最近的對應角色檔案
@@ -1138,14 +1173,14 @@ class DialogueApp:
                 # 綁定刷新邏輯
                 refresh_logs_btn.click(
                     fn=fetch_local_logs,
-                    inputs=[text_selector, session_id_text, log_limit, log_mask],
+                    inputs=[text_selector, session_id_text, log_limit, log_mask, log_path_state],
                     outputs=[current_session_display, current_character_display, log_file_path_display, log_table]
                 )
 
                 # 角色變更時自動更新一次
                 text_selector.change(
                     fn=fetch_local_logs,
-                    inputs=[text_selector, session_id_text, log_limit, log_mask],
+                    inputs=[text_selector, session_id_text, log_limit, log_mask, log_path_state],
                     outputs=[current_session_display, current_character_display, log_file_path_display, log_table]
                 )
             

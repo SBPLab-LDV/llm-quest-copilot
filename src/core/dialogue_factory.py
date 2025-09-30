@@ -15,7 +15,8 @@ from .dialogue import DialogueManager
 def create_dialogue_manager(character: Character, 
                            use_terminal: bool = False, 
                            log_dir: str = "logs",
-                           force_implementation: Optional[str] = None) -> DialogueManager:
+                           force_implementation: Optional[str] = None,
+                           log_file_basename: Optional[str] = None) -> DialogueManager:
     """根據配置創建對話管理器
     
     Args:
@@ -41,13 +42,13 @@ def create_dialogue_manager(character: Character,
     if force_implementation:
         if force_implementation.lower() == "original":
             logger.info("Forced to use original DialogueManager")
-            return _create_original_manager(character, use_terminal, log_dir)
+            return _create_original_manager(character, use_terminal, log_dir, log_file_basename)
         elif force_implementation.lower() == "dspy":
             logger.info("Forced to use DSPy DialogueManager")
-            return _create_dspy_manager(character, use_terminal, log_dir)
+            return _create_dspy_manager(character, use_terminal, log_dir, log_file_basename)
         elif force_implementation.lower() == "optimized":
             logger.info("Forced to use Optimized DSPy DialogueManager")
-            return _create_optimized_dspy_manager(character, use_terminal, log_dir)
+            return _create_optimized_dspy_manager(character, use_terminal, log_dir, log_file_basename)
         else:
             raise ValueError(f"Invalid force_implementation: {force_implementation}")
     
@@ -67,12 +68,12 @@ def create_dialogue_manager(character: Character,
                 return _create_dspy_manager(character, use_terminal, log_dir)
         else:
             logger.info("DSPy disabled in config - creating original DialogueManager")
-            return _create_original_manager(character, use_terminal, log_dir)
+            return _create_original_manager(character, use_terminal, log_dir, log_file_basename)
             
     except ImportError as e:
         logger.warning(f"Failed to load DSPy config: {e}")
         logger.info("Falling back to original DialogueManager")
-        return _create_original_manager(character, use_terminal, log_dir)
+        return _create_original_manager(character, use_terminal, log_dir, log_file_basename)
     
     except Exception as e:
         logger.error(f"Unexpected error in dialogue manager factory: {e}")
@@ -82,12 +83,13 @@ def create_dialogue_manager(character: Character,
 
 def _create_original_manager(character: Character, 
                            use_terminal: bool, 
-                           log_dir: str) -> DialogueManager:
+                           log_dir: str,
+                           log_file_basename: Optional[str] = None) -> DialogueManager:
     """創建原始對話管理器"""
     logger = logging.getLogger(__name__)
     
     try:
-        manager = DialogueManager(character, use_terminal, log_dir)
+        manager = DialogueManager(character, use_terminal, log_dir, log_file_basename=log_file_basename)
         logger.debug(f"Original DialogueManager created successfully")
         return manager
         
@@ -98,14 +100,15 @@ def _create_original_manager(character: Character,
 
 def _create_dspy_manager(character: Character, 
                         use_terminal: bool, 
-                        log_dir: str) -> DialogueManager:
+                        log_dir: str,
+                        log_file_basename: Optional[str] = None) -> DialogueManager:
     """創建 DSPy 對話管理器"""
     logger = logging.getLogger(__name__)
     
     try:
         from .dspy.dialogue_manager_dspy import DialogueManagerDSPy
         
-        manager = DialogueManagerDSPy(character, use_terminal, log_dir)
+        manager = DialogueManagerDSPy(character, use_terminal, log_dir, log_file_basename=log_file_basename)
         logger.debug(f"DSPy DialogueManager created successfully")
         return manager
         
@@ -122,26 +125,27 @@ def _create_dspy_manager(character: Character,
 
 def _create_optimized_dspy_manager(character: Character, 
                                   use_terminal: bool, 
-                                  log_dir: str) -> DialogueManager:
+                                  log_dir: str,
+                                  log_file_basename: Optional[str] = None) -> DialogueManager:
     """創建優化版 DSPy 對話管理器（統一模組，節省 66.7% API 調用）"""
     logger = logging.getLogger(__name__)
     
     try:
         from .dspy.optimized_dialogue_manager import OptimizedDialogueManagerDSPy
         
-        manager = OptimizedDialogueManagerDSPy(character, use_terminal, log_dir)
+        manager = OptimizedDialogueManagerDSPy(character, use_terminal, log_dir, log_file_basename=log_file_basename)
         logger.debug(f"Optimized DSPy DialogueManager created successfully")
         return manager
         
     except ImportError as e:
         logger.error(f"Failed to import Optimized DSPy DialogueManager: {e}")
         logger.warning("Falling back to regular DSPy DialogueManager")
-        return _create_dspy_manager(character, use_terminal, log_dir)
+        return _create_dspy_manager(character, use_terminal, log_dir, log_file_basename)
         
     except Exception as e:
         logger.error(f"Failed to create Optimized DSPy DialogueManager: {e}")
         logger.warning("Falling back to regular DSPy DialogueManager")
-        return _create_dspy_manager(character, use_terminal, log_dir)
+        return _create_dspy_manager(character, use_terminal, log_dir, log_file_basename)
 
 
 def get_available_implementations() -> Dict[str, Dict[str, Any]]:

@@ -12,7 +12,7 @@ import os # 導入 os 模組，用於檔案路徑操作
 import logging
 
 class DialogueManager:
-    def __init__(self, character: Character, use_terminal: bool = False, log_dir: str = "logs"):
+    def __init__(self, character: Character, use_terminal: bool = False, log_dir: str = "logs", log_file_basename: Optional[str] = None):
         """Initialize the DialogueManager.
         
         Args:
@@ -37,9 +37,15 @@ class DialogueManager:
         # 確保日誌目錄存在
         os.makedirs(self.log_dir, exist_ok=True)
 
-        # 根據角色名稱和日期決定日誌檔案名稱
-        today_date_str = datetime.datetime.now().strftime("%Y%m%d")
-        self.log_filename = f"{today_date_str}_patient_{self.character.name}_chat_{'terminal' if self.use_terminal else 'gui'}.log"
+        # 根據會話提供的 basename（若有）或回退到日期+角色名稱
+        if log_file_basename:
+            # 單一會話專屬檔名（與 DSPy 除錯檔一一對應的前綴）
+            mode = 'terminal' if self.use_terminal else 'gui'
+            self.log_filename = f"{log_file_basename}_chat_{mode}.log"
+        else:
+            # 回退：僅日期＋角色名稱（舊行為）
+            today_date_str = datetime.datetime.now().strftime("%Y%m%d")
+            self.log_filename = f"{today_date_str}_patient_{self.character.name}_chat_{'terminal' if self.use_terminal else 'gui'}.log"
         self.log_filepath = os.path.join(self.log_dir, self.log_filename)
 
     def _format_conversation_history(self) -> List[str]:

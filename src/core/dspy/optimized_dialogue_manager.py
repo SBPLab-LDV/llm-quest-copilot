@@ -29,7 +29,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
     - 提供詳細的節省統計
     """
     
-    def __init__(self, character: Character, use_terminal: bool = False, log_dir: str = "logs"):
+    def __init__(self, character: Character, use_terminal: bool = False, log_dir: str = "logs", log_file_basename: Optional[str] = None):
         """初始化優化版 DSPy 對話管理器
         
         Args:
@@ -38,7 +38,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             log_dir: Directory to save interaction logs
         """
         # 初始化父類
-        super().__init__(character, use_terminal, log_dir)
+        super().__init__(character, use_terminal, log_dir, log_file_basename=log_file_basename)
         
         self.logger = logging.getLogger(__name__)
         self.logger.info("OptimizedDialogueManagerDSPy.__init__ - 使用統一對話模組")
