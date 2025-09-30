@@ -1118,23 +1118,39 @@ class DialogueApp:
                 def fetch_local_logs(char_name: str, sess_id: str | None, limit: int, mask: bool, path_override: str | None):
                     """讀取本地 logs/api 的 JSON 行對話紀錄，回傳表格資料與檔案路徑。"""
                     try:
-                        from datetime import datetime
-                        today = datetime.now().strftime("%Y%m%d")
-                        # 優先使用伺服器提供的每會話檔案路徑
+                        # 1) 優先使用伺服器提供的每會話檔案路徑
                         target_file = path_override if (path_override and os.path.exists(path_override)) else None
-                        # 若無覆蓋，嘗試優先使用今日檔案（舊式命名）
-                        if not target_file:
-                            candidate = os.path.join(project_root, "logs", "api", f"{today}_patient_{char_name}_chat_gui.log")
-                            target_file = candidate if os.path.exists(candidate) else None
 
-                        if not target_file:
-                            # 回退：尋找最近的對應角色檔案
+                        # 2) 其次，若有 session_id，嘗試以 session 短ID 精確定位 per-session 檔案
+                        if not target_file and sess_id and isinstance(sess_id, str) and len(sess_id) >= 8:
+                            sess_short = sess_id[:8]
                             api_dir = os.path.join(project_root, "logs", "api")
-                            pattern_suffix = f"_patient_{char_name}_chat_gui.log"
+                            if os.path.isdir(api_dir):
+                                # 收集符合模式 *_{char}_sess_{short}_chat_gui.log 的所有檔案，取最新
+                                latest_path, latest_mtime = None, -1
+                                for fname in os.listdir(api_dir):
+                                    if fname.endswith("_chat_gui.log") and f"_{char_name}_sess_{sess_short}_" in fname:
+                                        fpath = os.path.join(api_dir, fname)
+                                        try:
+                                            mtime = os.path.getmtime(fpath)
+                                            if mtime > latest_mtime:
+                                                latest_mtime = mtime
+                                                latest_path = fpath
+                                        except Exception:
+                                            continue
+                                target_file = latest_path
+
+                        # 3) 最後，再以角色名稱掃描所有可能檔案（legacy 與 per-session），擇其新者
+                        if not target_file:
+                            api_dir = os.path.join(project_root, "logs", "api")
                             latest_path, latest_mtime = None, -1
                             if os.path.isdir(api_dir):
                                 for fname in os.listdir(api_dir):
-                                    if fname.endswith(pattern_suffix):
+                                    # legacy: *_patient_{char}_chat_gui.log
+                                    legacy_match = fname.endswith(f"_patient_{char_name}_chat_gui.log")
+                                    # per-session: *_{char}_sess_*_chat_gui.log
+                                    session_match = (fname.endswith("_chat_gui.log") and f"_{char_name}_sess_" in fname)
+                                    if legacy_match or session_match:
                                         fpath = os.path.join(api_dir, fname)
                                         try:
                                             mtime = os.path.getmtime(fpath)
