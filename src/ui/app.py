@@ -1056,7 +1056,25 @@ class DialogueApp:
                 
             # Add debug button for development (hidden in production)
             debug_button = gr.Button("Debug State", visible=True)
+            new_session_button = gr.Button("新會話", visible=True)
             debug_button.click(fn=debug_component_states, inputs=[], outputs=[])
+
+            @log_function_call
+            def new_session():
+                """Explicitly clear client session and log path state."""
+                try:
+                    self.api_client.reset_session()
+                except Exception:
+                    pass
+                # Return cleared states for both text/audio sessions and log viewer path
+                return None, None, None
+
+            # Bind the new session button to clear states
+            new_session_button.click(
+                fn=new_session,
+                inputs=[],
+                outputs=[session_id_text, session_id_audio, log_path_state] if 'log_path_state' in locals() else [session_id_text, session_id_audio]
+            )
 
             # ------------------------
             # Log Viewer (local files)
@@ -1183,6 +1201,22 @@ class DialogueApp:
                     inputs=[text_selector, session_id_text, log_limit, log_mask, log_path_state],
                     outputs=[current_session_display, current_character_display, log_file_path_display, log_table]
                 )
+
+            # 自動在頁面載入時清除會話狀態（觸發新會話）
+            @log_function_call
+            def on_page_load():
+                try:
+                    self.api_client.reset_session()
+                except Exception:
+                    pass
+                return None, None, None
+
+            # 綁定 load 事件（重新整理即清除會話）
+            app.load(
+                fn=on_page_load,
+                inputs=[],
+                outputs=[session_id_text, session_id_audio, log_path_state]
+            )
             
             # Add back the text dialogue button handlers before the return statement
             # 設置文本對話按鈕點擊事件
