@@ -34,6 +34,7 @@ JSON_OUTPUT_DIRECTIVE = (
     "嚴禁輸出無關的模板句（如『謝謝關心』『我會配合治療』『目前沒有發燒』）除非問題明確在問該事項。"
     "若資訊不足，請以針對性的詢問或請求協助/查證方式回應（仍需提及核心名詞），並產生 5 條彼此不同且與題目相關的句子。"
     "禁止添加 [[ ## field ## ]]、markdown 或任何額外文字，完整輸出後以 } 結束。"
+    "必須遵守上方提供的規則欄位（例如 term_usage_rules、response_style_rules、persona_voice_rules）。"
 )
 
 PERSONA_REMINDER_TEMPLATE = (
@@ -49,9 +50,9 @@ DEFAULT_CONTEXT_PRIORITY = [
 
 
 class UnifiedPatientResponseSignature(dspy.Signature):
-    """統一的病患回應生成簽名（精簡提示）。"""
+    """統一的病患回應生成簽名（精簡提示 + 可優化規則欄位）。"""
 
-    # 輸入欄位
+    # 輸入欄位（核心語境）
     user_input = dspy.InputField(desc="護理人員問題")
     character_name = dspy.InputField(desc="病患姓名")
     character_persona = dspy.InputField(desc="病患性格")
@@ -60,6 +61,11 @@ class UnifiedPatientResponseSignature(dspy.Signature):
     character_details = dspy.InputField(desc="關鍵病情資訊")
     conversation_history = dspy.InputField(desc="近期對話與提醒")
     available_contexts = dspy.InputField(desc="候選情境")
+
+    # 輸入欄位（可優化規則區塊：提供給 DSPy Optimizer 作為 prompt 片段）
+    term_usage_rules = dspy.InputField(desc="用語規範（稱謂/職稱/敏感詞替換）")
+    response_style_rules = dspy.InputField(desc="回應風格/多樣性/格式化規範")
+    persona_voice_rules = dspy.InputField(desc="病患語氣與知識邊界規則")
 
     # 輸出欄位（必填）
     reasoning = dspy.OutputField(desc="推理與一致性檢查")
@@ -146,6 +152,41 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         self.unified_response_generator = dspy.Predict(UnifiedPatientResponseSignature)
         self._json_adapter = UnifiedJSONAdapter(JSON_OUTPUT_DIRECTIVE)
 
+        # 預設規則片段（可被 Optimizer/設定覆蓋）
+        # 用語規範：避免職稱稱呼；若不得不提，嚴禁「護士」，一律使用「護理師」。
+        self._default_term_usage_rules = (
+            "【用語規範】回應不得以職稱稱呼對方；避免使用如『醫師』『護理師』等稱謂。"
+            "若不得不提職稱，嚴禁使用『護士』，一律使用『護理師』稱呼。"
+        )
+        # 風格規範：與現有 JSON_OUTPUT_DIRECTIVE 相輔相成，提供 Optimizer 可調的摘要規則
+        self._default_response_style_rules = (
+            "【數值回答政策】\n"
+            "- 嚴禁臆測數字；若不確定，不得為了多樣性而改變數字。\n"
+            "- 若有確定數字，僅在一個選項中以肯定語氣提供；其他選項不得重覆該數字，且不可隨意更換數字充作多樣性。\n"
+            "- 五句不得只是同一數字的不同措辭；每句需呈現互斥的意圖/策略。\n"
+            "- 若涉及時間框線（如『早上』），需先釐清或明確說明時間範圍（例如：06:00–12:00）。\n\n"
+            "【五槽位多樣性】（五句各取其一，不得重覆）\n"
+            "A. 確定事實：若已確定，僅此一個選項可提供明確數字。\n"
+            "B. 約略/範圍：以『大約/不超過/至少』等方式描述，但不得捏造數字。\n"
+            "C. 釐清條件：詢問時間範圍/是否包含特定輸液，以明確問題邊界。\n"
+            "D. 請求查證：請求協助查護理紀錄/醫囑/點滴單/輸液袋標籤，不提數字。\n"
+            "E. 行動方案：提出可行的即時核對步驟或可提供的輔助線索。\n\n"
+            "【格式/語氣】\n"
+            "- 單句、具體、自然、繁體中文；五句互不重覆，意圖取向不同。\n"
+            "- 避免模板化或空泛表述；若不確定，應明確說不確定並提出查證/補充資訊方案。"
+        )
+
+        # 病患語氣與知識邊界規則：限制專業語氣與臆測，強化第一人稱感受表述
+        self._default_persona_voice_rules = (
+            "【病患視角】一律用第一人稱（我/我的），只描述自身的感受、困擾與日常線索；"
+            "不得下指令安排檢查或治療，不對醫療流程提出專業建議。\n"
+            "【知識邊界】不臆測醫囑、診斷、藥理或流程細節；若不確定，明確說不太確定並提出查證或請求協助。\n"
+            "【詞彙層級】優先使用生活語彙與身體感受詞（痛、刺、悶、腫、乾、想吐、吞嚥困難…）；"
+            "需要提醫療名詞時，使用病患常見說法（如『止痛藥』『打點滴』），避免專業縮寫或術語。\n"
+            "【不確定與求助】不確定就說不確定；改以釐清（時間/範圍/對象）或請求協助查證（藥袋、護理紀錄、醫囑系統）。\n"
+            "【句式風格】單句、簡短、自然；避免模板化與說教式表述；專注回應當前問題。"
+        )
+
         # 追蹤最近一次模型輸出情境，做為下輪提示濾器
         self._last_context_label: Optional[str] = None
         self._fewshot_used = False
@@ -204,6 +245,15 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             import time
             call_start_time = time.time()
             
+            # 規則區塊可由設定覆寫（後續可擴充從 config 或 Optimizer 注入）
+            term_rules = self._default_term_usage_rules
+            style_rules = self._default_response_style_rules
+
+            # 規則區塊可由設定覆寫（後續可擴充從 config 或 Optimizer 注入）
+            term_rules = self._default_term_usage_rules
+            style_rules = self._default_response_style_rules
+            persona_rules = self._default_persona_voice_rules
+
             with settings.context(adapter=self._json_adapter):
                 unified_prediction = self.unified_response_generator(
                     user_input=user_input,
@@ -213,7 +263,10 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                     character_goal=character_goal,
                     character_details=character_details,
                     conversation_history=formatted_history,
-                    available_contexts=available_contexts
+                    available_contexts=available_contexts,
+                    term_usage_rules=term_rules,
+                    response_style_rules=style_rules,
+                    persona_voice_rules=persona_rules,
                 )
             
             call_end_time = time.time()
