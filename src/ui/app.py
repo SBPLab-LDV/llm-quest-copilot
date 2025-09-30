@@ -1038,43 +1038,7 @@ class DialogueApp:
                 outputs=[audio_session_display]
             )
                 
-            # Add debug function for UI state
-            @log_function_call
-            def debug_component_states():
-                """Debug function to print the current states of components"""
-                logger.info("=== DEBUG COMPONENT STATES ===")
-                logger.info(f"Response Box visible: {response_box.visible}")
-                logger.info(f"Button 1: visible={response_btn1.visible}, value='{response_btn1.value}'")
-                logger.info(f"Button 2: visible={response_btn2.visible}, value='{response_btn2.value}'")
-                logger.info(f"Button 3: visible={response_btn3.visible}, value='{response_btn3.value}'") 
-                logger.info(f"Button 4: visible={response_btn4.visible}, value='{response_btn4.value}'")
-                logger.info(f"Button 5: visible={response_btn5.visible}, value='{response_btn5.value}'")
-                logger.info(f"Current chatbot history: {text_chatbot.value}")
-                logger.info(f"Current session ID: {session_id_text.value}")
-                logger.info("=== END DEBUG ===")
-                return None
-                
-            # Add debug button for development (hidden in production)
-            debug_button = gr.Button("Debug State", visible=True)
-            new_session_button = gr.Button("新會話", visible=True)
-            debug_button.click(fn=debug_component_states, inputs=[], outputs=[])
-
-            @log_function_call
-            def new_session():
-                """Explicitly clear client session and log path state."""
-                try:
-                    self.api_client.reset_session()
-                except Exception:
-                    pass
-                # Return cleared states for both text/audio sessions and log viewer path
-                return None, None, None
-
-            # Bind the new session button to clear states
-            new_session_button.click(
-                fn=new_session,
-                inputs=[],
-                outputs=[session_id_text, session_id_audio, log_path_state] if 'log_path_state' in locals() else [session_id_text, session_id_audio]
-            )
+            # Debug State 與 新會話按鈕已移除（改以瀏覽器重新整理啟動新會話）
 
             # ------------------------
             # Log Viewer (local files)
@@ -1218,21 +1182,7 @@ class DialogueApp:
                     outputs=[current_session_display, current_character_display, log_file_path_display, log_table]
                 )
 
-            # 自動在頁面載入時清除會話狀態（觸發新會話）
-            @log_function_call
-            def on_page_load():
-                try:
-                    self.api_client.reset_session()
-                except Exception:
-                    pass
-                return None, None, None
-
-            # 綁定 load 事件（重新整理即清除會話）
-            app.load(
-                fn=on_page_load,
-                inputs=[],
-                outputs=[session_id_text, session_id_audio, log_path_state]
-            )
+            # 移除自動清除會話的 page-load 綁定；瀏覽器重新整理會重建 UI 與 ApiClient，自然建立新會話
             
             # Add back the text dialogue button handlers before the return statement
             # 設置文本對話按鈕點擊事件
