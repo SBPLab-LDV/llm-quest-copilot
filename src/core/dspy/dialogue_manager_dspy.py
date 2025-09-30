@@ -247,9 +247,27 @@ class DialogueManagerDSPy(DialogueManager):
     
     def _handle_gui_mode(self, user_input: str, response_data: Dict[str, Any], gui_selected_response: Optional[str] = None) -> str:
         """處理 GUI 模式的互動"""
-        # 記錄互動
-        self.log_interaction(user_input, response_data["responses"], selected_response=gui_selected_response)
-        self.save_interaction_log()
+        # Echo suppression: 若本輪輸入等同於最近病患發言，避免將其記入互動日誌
+        suppress_logging = False
+        try:
+            normalized_input = (user_input or "").strip()
+            if self.conversation_history and normalized_input:
+                patient_prefix = f"{self.character.name}: "
+                for entry in reversed(self.conversation_history):
+                    if isinstance(entry, str):
+                        s = entry.strip()
+                        if s.startswith(patient_prefix):
+                            last_patient_utterance = s[len(patient_prefix):].strip()
+                            if last_patient_utterance == normalized_input:
+                                suppress_logging = True
+                            break
+        except Exception:
+            suppress_logging = False
+
+        if not suppress_logging:
+            # 記錄互動
+            self.log_interaction(user_input, response_data["responses"], selected_response=gui_selected_response)
+            self.save_interaction_log()
 
         # 返回 JSON 格式回應
         return json.dumps(response_data, ensure_ascii=False)
