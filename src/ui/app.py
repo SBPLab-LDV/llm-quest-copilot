@@ -1027,6 +1027,127 @@ class DialogueApp:
             # Add debug button for development (hidden in production)
             debug_button = gr.Button("Debug State", visible=True)
             debug_button.click(fn=debug_component_states, inputs=[], outputs=[])
+
+            # ------------------------
+            # Log Viewer (local files)
+            # ------------------------
+            with gr.Accordion("對話紀錄 (Log Viewer)", open=False):
+                log_info = gr.Markdown("載入最近的對話紀錄檔案（本地 logs/api）")
+                with gr.Row():
+                    log_limit = gr.Slider(minimum=10, maximum=200, step=10, value=50, label="顯示筆數")
+                    log_mask = gr.Checkbox(label="遮蔽敏感資訊 (試驗)", value=False)
+                with gr.Row():
+                    current_session_display = gr.Textbox(label="目前會話ID", interactive=False)
+                    current_character_display = gr.Textbox(label="目前角色", interactive=False)
+                log_file_path_display = gr.Textbox(label="日誌檔案路徑 (偵測)", interactive=False)
+                log_table = gr.Dataframe(
+                    headers=["timestamp", "user_input", "response_options", "selected_response"],
+                    datatype=["str", "str", "str", "str"],
+                    row_count=(0, "dynamic"),
+                    col_count=(4, "fixed"),
+                    wrap=True,
+                    label="對話紀錄 (近期)"
+                )
+                refresh_logs_btn = gr.Button("刷新紀錄")
+
+                @log_function_call
+                def _mask_text(text: str) -> str:
+                    try:
+                        if not text:
+                            return text
+                        s = str(text)
+                        # 簡單遮蔽身分證樣式與電話（示意，非嚴格）
+                        import re
+                        s = re.sub(r"([A-Z][0-9]{9})", r"\1*****", s)
+                        s = re.sub(r"(\d{3,4})[- ]?(\d{3,4})[- ]?(\d{3,4})", r"***-***-****", s)
+                        return s
+                    except Exception:
+                        return str(text)
+
+                @log_function_call
+                def fetch_local_logs(char_name: str, sess_id: str | None, limit: int, mask: bool):
+                    """讀取本地 logs/api 的 JSON 行對話紀錄，回傳表格資料與檔案路徑。"""
+                    try:
+                        from datetime import datetime
+                        today = datetime.now().strftime("%Y%m%d")
+                        # 嘗試優先使用今日檔案
+                        candidate = os.path.join(project_root, "logs", "api", f"{today}_patient_{char_name}_chat_gui.log")
+                        target_file = candidate if os.path.exists(candidate) else None
+
+                        if not target_file:
+                            # 回退：尋找最近的對應角色檔案
+                            api_dir = os.path.join(project_root, "logs", "api")
+                            pattern_suffix = f"_patient_{char_name}_chat_gui.log"
+                            latest_path, latest_mtime = None, -1
+                            if os.path.isdir(api_dir):
+                                for fname in os.listdir(api_dir):
+                                    if fname.endswith(pattern_suffix):
+                                        fpath = os.path.join(api_dir, fname)
+                                        try:
+                                            mtime = os.path.getmtime(fpath)
+                                            if mtime > latest_mtime:
+                                                latest_mtime = mtime
+                                                latest_path = fpath
+                                        except Exception:
+                                            continue
+                            target_file = latest_path
+
+                        rows: list[list[str]] = []
+                        if target_file and os.path.exists(target_file):
+                            # 讀取最後 limit 行
+                            lines: list[str] = []
+                            with open(target_file, "r", encoding="utf-8") as f:
+                                for line in f:
+                                    if line.strip():
+                                        lines.append(line.rstrip("\n"))
+                            tail = lines[-int(limit):] if limit and limit > 0 else lines
+
+                            import json as _json
+                            for ln in tail:
+                                try:
+                                    rec = _json.loads(ln)
+                                except Exception:
+                                    continue
+                                ts = str(rec.get("timestamp", ""))
+                                q = str(rec.get("user_input", ""))
+                                opts = rec.get("response_options", [])
+                                sel = rec.get("selected_response", None)
+                                if not isinstance(opts, list):
+                                    opts = [str(opts)] if opts else []
+                                opts_str = "\n".join(f"{i+1}. {str(o)}" for i, o in enumerate(opts))
+                                sel_str = str(sel) if sel is not None else ""
+                                if mask:
+                                    ts = _mask_text(ts)
+                                    q = _mask_text(q)
+                                    opts_str = _mask_text(opts_str)
+                                    sel_str = _mask_text(sel_str)
+                                rows.append([ts, q, opts_str, sel_str])
+                        else:
+                            target_file = target_file or "(未找到)"
+                        # 更新三個顯示欄位
+                        return (
+                            sess_id or "(無)",
+                            char_name or "(未選擇)",
+                            str(target_file),
+                            rows
+                        )
+                    except Exception as e:
+                        logger.error(f"讀取本地紀錄失敗: {e}")
+                        return (sess_id or "(無)", char_name or "(未選擇)", "(錯誤)", [])
+
+                # 綁定刷新邏輯
+                refresh_logs_btn.click(
+                    fn=fetch_local_logs,
+                    inputs=[text_selector, session_id_text, log_limit, log_mask],
+                    outputs=[current_session_display, current_character_display, log_file_path_display, log_table]
+                )
+
+                # 角色變更時自動更新一次
+                text_selector.change(
+                    fn=fetch_local_logs,
+                    inputs=[text_selector, session_id_text, log_limit, log_mask],
+                    outputs=[current_session_display, current_character_display, log_file_path_display, log_table]
+                )
             
             # Add back the text dialogue button handlers before the return statement
             # 設置文本對話按鈕點擊事件
