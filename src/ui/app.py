@@ -1031,12 +1031,6 @@ class DialogueApp:
                 inputs=[session_id_text],
                 outputs=[text_session_display]
             )
-            # 會話ID變更時，同步刷新 Log Viewer（避免手動點刷新）
-            session_id_text.change(
-                fn=fetch_local_logs,
-                inputs=[text_selector, session_id_text, log_limit, log_mask, log_path_state],
-                outputs=[current_session_display, current_character_display, log_file_path_display, log_table]
-            )
             
             session_id_audio.change(
                 fn=lambda s: s if s else "尚未建立會話",
@@ -1274,21 +1268,6 @@ class DialogueApp:
                 fn=update_response_buttons,
                 inputs=[response_options],
                 outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
-            )
-
-            # 在發送文本後自動刷新 Log Viewer（使用伺服器回傳的 per-session 路徑）
-            text_send_btn.click(
-                fn=handle_text_input,
-                inputs=[text_input, text_chatbot, character_id, session_id_text, custom_config],
-                outputs=[text_input, text_chatbot, session_id_text, response_options]
-            ).then(
-                fn=update_response_buttons,
-                inputs=[response_options],
-                outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
-            ).then(
-                fn=fetch_local_logs,
-                inputs=[text_selector, session_id_text, log_limit, log_mask, log_path_state],
-                outputs=[current_session_display, current_character_display, log_file_path_display, log_table]
             )
         
         # 返回所有組件
