@@ -328,9 +328,8 @@ class ApiClient:
         try:
             # 注意：本地測試環境可能沒有角色列表 API
             # 返回一些預設角色以便測試
-            logger.info(f"返回預設角色列表進行測試")
+            logger.info(f"返回預設角色列表進行測試（不含 default）")
             return [
-                {"id": "0", "name": "default"},
                 {"id": "1", "name": "王大華"},
                 {"id": "2", "name": "王建中"},
                 {"id": "3", "name": "廖家豪"},

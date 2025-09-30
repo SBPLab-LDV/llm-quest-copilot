@@ -103,7 +103,7 @@ class DialogueApp:
         # 創建基本界面
         with gr.Blocks(
             theme=gr.themes.Soft(), 
-            title="醫護對話系統",
+            title="醫護對話系統 v0.2",
             css="""
             #response_box, #audio_response_box {
                 border: 1px solid rgba(128, 128, 128, 0.2) !important; 
@@ -118,11 +118,11 @@ class DialogueApp:
             }
             """
         ) as app:
-            gr.Markdown("# 醫護對話系統")
+            gr.Markdown("# 醫護對話系統 v0.2")
             gr.Markdown("使用此界面與虛擬病患進行對話。您可以選擇不同的角色進行對話。")
             
-            # 創建會話狀態
-            character_id = gr.State("0")  # 默認角色 ID
+            # 創建會話狀態（不使用 default，預設為第一個正式角色）
+            character_id = gr.State("1")  # 默認角色 ID 改為 1
             session_id_text = gr.State(None)  # 文本對話會話 ID
             session_id_audio = gr.State(None)  # 語音對話會話 ID
             custom_config = gr.State(None)  # 自定義角色配置

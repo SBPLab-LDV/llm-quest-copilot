@@ -27,9 +27,12 @@ def create_character_selector(api_client, on_change: Optional[Callable] = None):
     # 獲取角色列表
     characters = api_client.get_characters()
     
-    # 如果無法獲取角色，使用默認值
+    # 如果無法獲取角色，使用安全預設（不含 default）
     if not characters:
-        characters = [{"id": "0", "name": "default"}]
+        characters = [
+            {"id": "1", "name": "王大華"},
+            {"id": "custom", "name": "自定義病患"},
+        ]
     
     # 創建角色選項
     character_names = [char["name"] for char in characters]
@@ -129,8 +132,8 @@ def create_chat_ui():
     Returns:
         UI 組件集合
     """
-    with gr.Blocks(theme=gr.themes.Soft(), title="醫護對話系統") as app:
-        gr.Markdown("# 醫護對話系統")
+    with gr.Blocks(theme=gr.themes.Soft(), title="醫護對話系統 v0.2") as app:
+        gr.Markdown("# 醫護對話系統 v0.2")
         gr.Markdown("使用此界面與虛擬病患進行對話。您可以選擇不同的角色和回應格式。")
         
         with gr.Row():
