@@ -427,15 +427,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
         # 記錄互動
         self.log_interaction(user_input, response_data["responses"], selected_response=gui_selected_response)
         self.save_interaction_log()
-        
-        # 追加病患回應到對話歷史（選擇首個建議，便於下一輪提供上下文）
-        try:
-            normalized = self._normalize_responses(response_data.get("responses", []))
-            if normalized:
-                self.conversation_history.append(f"{self.character.name}: {normalized[0]}")
-        except Exception:
-            pass
-        
+
         # 返回 JSON 格式回應
         return json.dumps(response_data, ensure_ascii=False)
     

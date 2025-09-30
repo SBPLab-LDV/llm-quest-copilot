@@ -232,15 +232,7 @@ class DialogueManagerDSPy(DialogueManager):
         # 記錄互動
         self.log_interaction(user_input, response_data["responses"], selected_response=gui_selected_response)
         self.save_interaction_log()
-        
-        # 將AI首選回應追加至對話歷史，提升下一輪上下文品質
-        try:
-            if response_data.get("responses"):
-                top_resp = str(response_data["responses"][0])
-                self.conversation_history.append(f"{self.character.name}: {top_resp}")
-        except Exception:
-            pass
-        
+
         # 返回 JSON 格式回應
         return json.dumps(response_data, ensure_ascii=False)
     
