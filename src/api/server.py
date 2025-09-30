@@ -831,6 +831,17 @@ def create_dialogue_manager_with_monitoring(character: Character, log_dir: str =
         if sess_short:
             base = f"{base}_sess_{sess_short}"
         manager = create_dialogue_manager(character, use_terminal=False, log_dir=log_dir, log_file_basename=base)
+
+        # 強制綁定 chat_gui 檔名，確保與 dspy_debug 一一對應（消除任何回退命名影響）
+        try:
+            chat_dir = log_dir
+            os.makedirs(chat_dir, exist_ok=True)
+            chat_filename = f"{base}_chat_gui.log"
+            manager.log_filename = chat_filename
+            manager.log_filepath = os.path.join(chat_dir, chat_filename)
+            logger.info(f"已設定會話專屬 chat_gui 檔案: {manager.log_filepath}")
+        except Exception as _e:
+            logger.warning(f"設定 chat_gui 檔名失敗（將使用預設）: {_e}")
         
         # 檢測實現版本
         implementation_version = "original"
