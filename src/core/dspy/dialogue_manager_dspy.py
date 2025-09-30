@@ -16,7 +16,6 @@ from ..dialogue import DialogueManager
 from ..character import Character
 from ..state import DialogueState
 from .dialogue_module import DSPyDialogueModule
-from .evaluator import DSPyEvaluator
 from .config import DSPyConfig
 
 
@@ -49,7 +48,6 @@ class DialogueManagerDSPy(DialogueManager):
             if self.dspy_enabled:
                 self.logger.info("DSPy enabled - initializing DSPy components")
                 self.dialogue_module = DSPyDialogueModule()
-                self.evaluator = DSPyEvaluator()
                 self.logger.info("DSPy components initialized successfully")
             else:
                 self.logger.warning("DSPy disabled in config - falling back to parent implementation")
@@ -108,12 +106,7 @@ class DialogueManagerDSPy(DialogueManager):
             # 處理預測結果
             response_data = self._process_dspy_prediction(prediction)
             
-            # 使用評估器評估回應品質
-            try:
-                evaluation = self.evaluator.evaluate_prediction(user_input, prediction)
-                self.logger.debug(f"Response evaluation: {evaluation['overall_score']:.2f}")
-            except Exception as e:
-                self.logger.warning(f"Evaluation failed: {e}")
+            # 評估器僅用於診斷，現已移除以精簡執行路徑
             
             # 更新對話狀態
             self._update_dialogue_state(response_data)

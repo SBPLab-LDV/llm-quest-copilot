@@ -158,22 +158,17 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             "【用語規範】回應不得以職稱稱呼對方；避免使用如『醫師』『護理師』等稱謂。"
             "若不得不提職稱，嚴禁使用『護士』，一律使用『護理師』稱呼。"
         )
-        # 風格規範：與現有 JSON_OUTPUT_DIRECTIVE 相輔相成，提供 Optimizer 可調的摘要規則
-        self._default_response_style_rules = (
+        # 數值問句專用風格規範（與 JSON_OUTPUT_DIRECTIVE 相輔相成；可被 Optimizer 覆寫）
+        self._default_numeric_response_style_rules = (
             "【數值回答政策】\n"
             "- 嚴禁臆測數字；若不確定，不得為了多樣性而改變數字。\n"
             "- 若有確定數字，僅在一個選項中以肯定語氣提供；其他選項不得重覆該數字，且不可隨意更換數字充作多樣性。\n"
             "- 五句不得只是同一數字的不同措辭；每句需呈現互斥的意圖/策略。\n"
             "- 若涉及時間框線（如『早上』），需先釐清或明確說明時間範圍（例如：06:00–12:00）。\n\n"
             "【五槽位多樣性】（五句各取其一，不得重覆）\n"
-            "A. 確定事實：若已確定，僅此一個選項可提供明確數字。\n"
-            "B. 約略/範圍：以『大約/不超過/至少』等方式描述，但不得捏造數字。\n"
-            "C. 釐清條件：詢問時間範圍/是否包含特定輸液，以明確問題邊界。\n"
-            "D. 請求查證：請求協助查護理紀錄/醫囑/點滴單/輸液袋標籤，不提數字。\n"
-            "E. 行動方案：提出可行的即時核對步驟或可提供的輔助線索。\n\n"
             "【格式/語氣】\n"
             "- 單句、具體、自然、繁體中文；五句互不重覆，意圖取向不同。\n"
-            "- 避免模板化或空泛表述；若不確定，應明確說不確定並提出查證/補充資訊方案。"
+            "- 避免模板化或空泛表述；『不確定/不太記得/能不能再說一次』等不確定語氣最多允許出現 1 次；其餘句子須提供具體內容（復述、釐清、查證或行動）。"
         )
 
         # 病患語氣與知識邊界規則：限制專業語氣與臆測，強化第一人稱感受表述
@@ -185,6 +180,14 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             "需要提醫療名詞時，使用病患常見說法（如『止痛藥』『打點滴』），避免專業縮寫或術語。\n"
             "【不確定與求助】不確定就說不確定；改以釐清（時間/範圍/對象）或請求協助查證（藥袋、護理紀錄、醫囑系統）。\n"
             "【句式風格】單句、簡短、自然；避免模板化與說教式表述；專注回應當前問題。"
+        )
+
+        # 一般問句的風格規範（避免過度『不確定』；優先引用歷史已知資訊）
+        self._default_general_response_style_rules = (
+            "【歷史優先】如對話歷史或角色設定中已有可引用的具體事實（藥名/劑量/頻次/時間/數字），至少在一個選項中直接且自然地引用，不得表達不確定。\n"
+            "【不確定上限】『我不確定』『我不太記得』『可以再說一次嗎』等模板最多允許出現 1 次；其餘選項須提供能推進對話的具體內容（復述關鍵詞、提供定位資訊、釐清問題邊界、提出查證或行動建議）。\n"
+            "【內容多樣性】多樣性來自意圖/策略的互斥，而非同義改寫；避免僅換說法不換內容。\n"
+            "【詞彙與語氣】單句、具體、自然、繁體中文；避免專業術語與說教口吻；以病患視角描述感受與需要。"
         )
 
         # 追蹤最近一次模型輸出情境，做為下輪提示濾器
@@ -247,11 +250,12 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             
             # 規則區塊可由設定覆寫（後續可擴充從 config 或 Optimizer 注入）
             term_rules = self._default_term_usage_rules
-            style_rules = self._default_response_style_rules
-
-            # 規則區塊可由設定覆寫（後續可擴充從 config 或 Optimizer 注入）
-            term_rules = self._default_term_usage_rules
-            style_rules = self._default_response_style_rules
+            # 依輸入意圖選用不同風格規則（數值問句 vs 一般問句）
+            style_rules = (
+                self._default_numeric_response_style_rules
+                if self._is_numeric_query(user_input)
+                else self._default_general_response_style_rules
+            )
             persona_rules = self._default_persona_voice_rules
 
             with settings.context(adapter=self._json_adapter):
@@ -380,10 +384,10 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                     return dspy.Prediction(
                         user_input=user_input,
                         responses=[str(x).strip() for x in salv_responses if str(x).strip()][:5] or [
-                            "我目前無法確認，請您再提供更具體的資訊。",
-                            "可否說明藥名、劑量與服用頻次？",
-                            "如果不確定，請直接說不確定。",
-                            "我會依據您提供的資訊再回覆。",
+                            "語言模型伺服器超出限制，請聯繫管理人員。",
+                            "語言模型伺服器超出限制，請聯繫管理人員",
+                            "語言模型伺服器超出限制，請聯繫管理人員",
+                            "語言模型伺服器超出限制，請聯繫管理人員",
                             "謝謝。",
                         ],
                         state="NORMAL",
@@ -406,10 +410,10 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
 
             # 中立的兜底回覆，避免誤導（不再提及發燒/治療等內容）
             neutral_responses = [
-                "我目前無法確認，請您再提供更具體的資訊。",
-                "可否說明藥名、劑量與服用頻次？",
-                "如果不確定，請直接說不確定。",
-                "我會依據您提供的資訊再回覆。",
+                "語言模型伺服器超出限制，請聯繫管理人員",
+                "語言模型伺服器超出限制，請聯繫管理人員",
+                "語言模型伺服器超出限制，請聯繫管理人員",
+                "語言模型伺服器超出限制，請聯繫管理人員",
                 "謝謝。",
             ]
             return dspy.Prediction(
@@ -768,6 +772,32 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         }
         
         return unified_stats
+
+    # ------------------------------------------------------------------
+    # Intent utilities
+    # ------------------------------------------------------------------
+    def _is_numeric_query(self, text: str) -> bool:
+        """粗略偵測是否為數值/計量相關問句。
+
+        避免沉重 NLU；使用高召回率的關鍵詞啟發（中文常見量詞/疑問詞）。
+        """
+        if not isinstance(text, str):
+            return False
+        s = text.strip()
+        if not s:
+            return False
+        # 觸發詞：幾、多少、幾次、幾罐、幾盒、幾顆、幾片、幾毫升、幾公克、幾點、幾天...
+        keywords = [
+            "幾", "多少", "幾次", "幾罐", "幾瓶", "幾袋", "幾顆", "幾片", "幾毫升", "幾公克",
+            "幾點", "幾天", "幾週", "幾個", "幾項", "幾人", "幾號",
+        ]
+        # 量詞/數字圖樣：阿拉伯數字 + 量詞（罐/瓶/袋/次）也可視作數值意圖
+        import re
+        if any(k in s for k in keywords):
+            return True
+        if re.search(r"\d+\s*(罐|瓶|袋|次|顆|片|毫升|公克)", s):
+            return True
+        return False
     
     def reset_unified_statistics(self):
         """重置統一模組統計"""
@@ -778,21 +808,6 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             'success_rate': 0.0,
             'last_reset': datetime.now().isoformat()
         }
-
-    def _apply_consistency_fixes(self, responses: List[str], consistency_result) -> List[str]:
-        """根據一致性結果對回應進行最小侵入式修正
-        - high：移除自我介紹/明顯矛盾回應；若全被移除則回退保留前兩則中性回應
-        - medium/low：附加輕量提示文字，提醒保持與先前陳述一致
-        """
-        if not responses:
-            return responses
-
-        # 目前僅記錄一致性結果，不再修改 Gemini 回覆內容，以便檢視原始輸出。
-        try:
-            _ = {c.type for c in consistency_result.contradictions}
-        except Exception:
-            pass
-        return list(responses)
 
 
 # 工廠函數

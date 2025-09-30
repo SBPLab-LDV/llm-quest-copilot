@@ -719,53 +719,14 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             metrics = {
                 "Response_Count": len(responses),
                 "Average_Length": sum(len(str(r)) for r in responses) // max(1, len(responses)),
-                "Has_Medical_Terms": self._has_medical_terms(responses),
-                "Has_Self_Introduction": self._has_self_introduction(response_data),
-                "Context_Relevance": self._calculate_context_relevance("", response_data),  # 簡化版
-                "Diversity_Score": self._calculate_response_diversity(responses)
             }
             
             return metrics
             
         except Exception as e:
             return {"Error": str(e)}
-    
-    def _has_medical_terms(self, responses: list) -> bool:
-        """檢查是否包含醫療術語"""
-        medical_terms = ["症狀", "檢查", "傷口", "恢復", "治療", "藥物", "護理", "醫師", "病房"]
-        return any(
-            any(term in str(response) for term in medical_terms)
-            for response in responses
-        )
 
-    def _has_self_introduction(self, response_data: dict) -> bool:
-        """檢查是否包含自我介紹樣式，避免模板化開頭。
-
-        極簡偵測：只要任一回應包含常見自介片語即算命中。
-        """
-        patterns = [
-            "我是", "我叫", "我的名字", "姓名是", "您好，我是", "抱歉，我是", "Patient_",
-        ]
-        try:
-            responses = response_data.get("responses", []) or []
-            return any(any(p in str(r) for p in patterns) for r in responses)
-        except Exception:
-            return False
     
-    def _calculate_response_diversity(self, responses: list) -> float:
-        """計算回應多樣性分數"""
-        try:
-            if len(responses) <= 1:
-                return 0.0
-            
-            # 簡單的多樣性檢查：計算不同開頭的比例
-            first_chars = [str(r)[0] if str(r) else '' for r in responses]
-            unique_starts = len(set(first_chars))
-            
-            return unique_starts / len(responses)
-            
-        except Exception:
-            return 0.5
     
     # 簡化：移除退化風險/複雜度/記憶體與關鍵輪分析與狀態歷史方法（無行為影響）
     
