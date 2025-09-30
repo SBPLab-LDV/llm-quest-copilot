@@ -337,6 +337,11 @@ class DialogueApp:
                 
                 # 返回更新後的對話歷史和會話ID，清空選項
                 return history, session_id, []
+
+            @log_function_call
+            def _clear_text_input():
+                """在選擇回覆後清空文字輸入，避免誤將病患回覆當成下一輪提問送出"""
+                return ""
             
             @log_function_call
             def handle_text_input(text, history, char_id, sess_id, config):
@@ -1194,6 +1199,10 @@ class DialogueApp:
                 fn=update_response_buttons,
                 inputs=[response_options],
                 outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
+            ).then(
+                fn=_clear_text_input,
+                inputs=[],
+                outputs=[text_input]
             )
 
             response_btn2.click(
@@ -1204,6 +1213,10 @@ class DialogueApp:
                 fn=update_response_buttons,
                 inputs=[response_options],
                 outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
+            ).then(
+                fn=_clear_text_input,
+                inputs=[],
+                outputs=[text_input]
             )
 
             response_btn3.click(
@@ -1214,6 +1227,10 @@ class DialogueApp:
                 fn=update_response_buttons,
                 inputs=[response_options],
                 outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
+            ).then(
+                fn=_clear_text_input,
+                inputs=[],
+                outputs=[text_input]
             )
 
             response_btn4.click(
@@ -1224,6 +1241,10 @@ class DialogueApp:
                 fn=update_response_buttons,
                 inputs=[response_options],
                 outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
+            ).then(
+                fn=_clear_text_input,
+                inputs=[],
+                outputs=[text_input]
             )
 
             response_btn5.click(
@@ -1234,6 +1255,10 @@ class DialogueApp:
                 fn=update_response_buttons,
                 inputs=[response_options],
                 outputs=[response_box, response_btn1, response_btn2, response_btn3, response_btn4, response_btn5]
+            ).then(
+                fn=_clear_text_input,
+                inputs=[],
+                outputs=[text_input]
             )
         
         # 返回所有組件

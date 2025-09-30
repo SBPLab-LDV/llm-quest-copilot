@@ -101,6 +101,22 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
         try:
             self.logger.info(f"=== 優化版對話處理 (第 {self.optimization_stats['total_conversations']} 次) ===")
             self.logger.info(f"用戶輸入: {user_input}")
+
+            # Echo suppression: avoid recording caregiver line if it exactly repeats last patient utterance
+            try:
+                normalized_input = (user_input or "").strip()
+                last_patient_utterance: Optional[str] = None
+                if self.conversation_history and normalized_input:
+                    patient_prefix = f"{self.character.name}: "
+                    for entry in reversed(self.conversation_history):
+                        if isinstance(entry, str):
+                            s = entry.strip()
+                            if s.startswith(patient_prefix):
+                                last_patient_utterance = s[len(patient_prefix):].strip()
+                                break
+                is_echo_of_patient = last_patient_utterance and (last_patient_utterance == normalized_input)
+            except Exception:
+                is_echo_of_patient = False
             
             # 檢查重複輸入 - 避免在會話中添加相同的輸入
             last_user_input = None
@@ -113,11 +129,12 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             is_duplicate_input = (last_user_input == user_input)
             
             # 只有不是重複輸入時才記錄到對話歷史
-            if not is_duplicate_input:
+            if not is_duplicate_input and not is_echo_of_patient:
                 self.conversation_history.append(f"護理人員: {user_input}")
                 self.logger.info(f"✅ 新輸入已記錄到對話歷史")
             else:
-                self.logger.info(f"⚠️ 檢測到重複輸入，跳過記錄到對話歷史，避免混亂")
+                reason = "與上一輪護理人員輸入重複" if is_duplicate_input else "與上一輪病患選擇回覆相同(回聲抑制)"
+                self.logger.info(f"⚠️ 跳過記錄到對話歷史：{reason}")
             
             # 使用優化的統一對話模組 (僅1次 API 調用)
             prediction = self.dialogue_module(

@@ -86,9 +86,27 @@ class DialogueManagerDSPy(DialogueManager):
         try:
             self.stats['dspy_calls'] += 1
             self.logger.debug(f"Processing turn with DSPy: '{user_input}'")
-            
-            # 記錄用戶輸入到對話歷史
-            self.conversation_history.append(f"護理人員: {user_input}")
+
+            # Echo suppression: 如果本輪輸入與上一輪病患發言相同，避免將其記為護理人員發言
+            try:
+                normalized_input = (user_input or "").strip()
+                last_patient_utterance: Optional[str] = None
+                if self.conversation_history and normalized_input:
+                    patient_prefix = f"{self.character.name}: "
+                    for entry in reversed(self.conversation_history):
+                        if isinstance(entry, str):
+                            s = entry.strip()
+                            if s.startswith(patient_prefix):
+                                last_patient_utterance = s[len(patient_prefix):].strip()
+                                break
+                is_echo_of_patient = last_patient_utterance and (last_patient_utterance == normalized_input)
+            except Exception:
+                is_echo_of_patient = False
+
+            if not is_echo_of_patient:
+                self.conversation_history.append(f"護理人員: {user_input}")
+            else:
+                self.logger.info("⚠️ 跳過記錄到對話歷史：與上一輪病患選擇回覆相同(回聲抑制)")
             
             # 使用 DSPy 對話模組處理輸入
             prediction = self.dialogue_module(
