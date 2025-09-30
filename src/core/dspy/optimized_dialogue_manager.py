@@ -188,8 +188,13 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 # 最終防護：生成安全的恢復回應
                 return self._generate_emergency_response(user_input)
     
-    def _get_character_details(self) -> str:
-        """回傳簡潔的角色摘要供提示使用。"""
+    def _get_character_details(self) -> Any:
+        """回傳完整的角色詳細設定（盡可能保留 characters.yaml 的全部資訊）。
+
+        - 若有 details 字典：返回 { fixed_settings, floating_settings, summary }
+        - 若 details 為可解析的 JSON 字串：解析後返回同上結構
+        - 否則：返回簡短字串摘要（與舊行為相容）
+        """
         summary_parts: List[str] = []
 
         details_dict: Optional[Dict[str, Any]] = None
@@ -232,21 +237,31 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             if notes and len(notes) <= 80:
                 summary_parts.append(f"現況: {notes}")
 
-        if not summary_parts:
-            fallback = [
-                f"姓名: {getattr(self.character, 'name', '未知')}",
-                getattr(self.character, 'persona', ''),
-                getattr(self.character, 'goal', ''),
-            ]
-            summary_parts.extend(part for part in fallback if part)
+            summary = " | ".join(p for p in summary_parts if p)
+            # 記錄簡要的鍵數統計，便於在 dspy_internal_debug.log 佐證
+            try:
+                self.logger.info(
+                    "[DETAILS] fixed=%d keys, floating=%d keys (summary_len=%d)",
+                    len(fixed) if isinstance(fixed, dict) else 0,
+                    len(floating) if isinstance(floating, dict) else 0,
+                    len(summary),
+                )
+            except Exception:
+                pass
 
-        summary = " | ".join(summary_parts)
+            return {
+                'fixed_settings': fixed,
+                'floating_settings': floating,
+                'summary': summary
+            }
 
-        if not self._character_profile_emitted:
-            self._character_profile_emitted = True
-            return summary
-
-        return ""
+        # 無 details 可用時：回退到簡短字串（相容舊行為）
+        fallback = [
+            f"姓名: {getattr(self.character, 'name', '未知')}",
+            getattr(self.character, 'persona', ''),
+            getattr(self.character, 'goal', ''),
+        ]
+        return " | ".join(part for part in fallback if part)
     
     def _process_optimized_prediction(self, prediction) -> dict:
         """處理優化版預測結果"""
