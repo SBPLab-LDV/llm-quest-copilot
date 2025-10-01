@@ -1261,21 +1261,6 @@ class DialogueApp:
                 outputs=[text_input]
             )
         
-            # 返回所有組件
-            return {
-                "app": app,
-                "text_chatbot": text_chatbot,
-                "text_input": text_input,
-                "audio_input": audio_input,
-                "text_selector": text_selector,
-                "audio_selector": audio_selector,
-                "text_send_btn": text_send_btn,
-                "text_reset_btn": text_reset_btn,
-                "audio_reset_btn": audio_reset_btn,
-                "text_custom_char": text_custom_char,
-                "audio_custom_char": audio_custom_char
-            }
-
             # ------------------------
             # Page-load: reset session safely (refresh => new session)
             # ------------------------
@@ -1294,6 +1279,21 @@ class DialogueApp:
                 inputs=[],
                 outputs=[session_id_text, session_id_audio]
             )
+
+            # 返回所有組件
+            return {
+                "app": app,
+                "text_chatbot": text_chatbot,
+                "text_input": text_input,
+                "audio_input": audio_input,
+                "text_selector": text_selector,
+                "audio_selector": audio_selector,
+                "text_send_btn": text_send_btn,
+                "text_reset_btn": text_reset_btn,
+                "audio_reset_btn": audio_reset_btn,
+                "text_custom_char": text_custom_char,
+                "audio_custom_char": audio_custom_char
+            }
     
     def launch(self, **kwargs):
         """啟動 Gradio 應用
