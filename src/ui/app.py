@@ -1261,20 +1261,39 @@ class DialogueApp:
                 outputs=[text_input]
             )
         
-        # 返回所有組件
-        return {
-            "app": app,
-            "text_chatbot": text_chatbot,
-            "text_input": text_input,
-            "audio_input": audio_input,
-            "text_selector": text_selector,
-            "audio_selector": audio_selector,
-            "text_send_btn": text_send_btn,
-            "text_reset_btn": text_reset_btn,
-            "audio_reset_btn": audio_reset_btn,
-            "text_custom_char": text_custom_char,
-            "audio_custom_char": audio_custom_char
-        }
+            # 返回所有組件
+            return {
+                "app": app,
+                "text_chatbot": text_chatbot,
+                "text_input": text_input,
+                "audio_input": audio_input,
+                "text_selector": text_selector,
+                "audio_selector": audio_selector,
+                "text_send_btn": text_send_btn,
+                "text_reset_btn": text_reset_btn,
+                "audio_reset_btn": audio_reset_btn,
+                "text_custom_char": text_custom_char,
+                "audio_custom_char": audio_custom_char
+            }
+
+            # ------------------------
+            # Page-load: reset session safely (refresh => new session)
+            # ------------------------
+            @log_function_call
+            def _on_page_load_reset_session():
+                try:
+                    self.api_client.reset_session()
+                except Exception:
+                    pass
+                # 清空兩個會話狀態；不回傳其他尚未保證存在的狀態，避免綁定不匹配
+                return None, None
+
+            # 綁定 page-load 事件：瀏覽器重新整理即清空會話（不影響其他元件）
+            app.load(
+                fn=_on_page_load_reset_session,
+                inputs=[],
+                outputs=[session_id_text, session_id_audio]
+            )
     
     def launch(self, **kwargs):
         """啟動 Gradio 應用
