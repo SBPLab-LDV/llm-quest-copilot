@@ -103,11 +103,18 @@ def summarize_character(character: Optional[Character]) -> str:
 
 
 def build_audio_template_rules(option_count: int) -> str:
+    """Return a concise runtime rule string for audio tasks.
+
+    Keep only output shape + minimal enforcement to lower token usage.
+    """
     return (
-        "請輸出單一合法 JSON，包含 'original' 與 'options'。"
-        f" 'options' 必須為長度 {option_count} 的完整句子陣列，且每句需包含明確的行動/物品/情境，"
-        "避免模糊表達（如『我想吃』『我要』『幫我』），內容需貼合住院醫療情境並使用繁體中文；"
-        "嚴禁輸出 markdown、程式碼區塊或額外解說。若無法辨識，請提供 {option_count} 句友善的澄清/請求協助之建議。"
+        # Output shape
+        "請輸出單一合法 JSON（不得使用 markdown），包含 'original' 與 'options'；"
+        f"'options' 為長度 {option_count} 的完整句子陣列（繁體中文、單句）。"
+        # Core enforcement
+        " 'original' 需保留關鍵詞，對破碎輸入可溫和重建但不得臆造新意；"
+        " 若 original 以逗號/頓號分隔多個短語，將每個短語視為一個『意圖』，前若干句需逐一直接對齊各意圖（直述或請求評估），不得以與意圖無關的泛用句取代；"
+        " 如動作/處置與【角色摘要】或【近期對話】的限制（不可說話/吞嚥/下床/口進食/鼻胃管/氣切）矛盾，請改為『請求評估/如何安全地…』的表達。"
     )
 
 
