@@ -485,11 +485,21 @@ class DialogueApp:
             def handle_reset_text():
                 """重置文本對話"""
                 self.api_client.reset_session()
+                # 清空每會話日誌覆寫路徑，避免刷新時讀取舊檔
+                try:
+                    log_path_state.value = None
+                except Exception:
+                    pass
                 return [], None, []
             
             def handle_reset_audio():
                 """重置語音對話"""
                 self.api_client.reset_session()
+                # 清空每會話日誌覆寫路徑，避免刷新時讀取舊檔
+                try:
+                    log_path_state.value = None
+                except Exception:
+                    pass
                 return [], None, []
             
             def handle_audio_input(audio_path, history, char_id, sess_id, config):
@@ -727,6 +737,11 @@ class DialogueApp:
                         sess_id = None
                         self.api_client.reset_session()
                         logger.info("已重置會話ID以使用新的角色設定")
+                        # 清空每會話日誌覆寫路徑，避免刷新時讀取舊檔
+                        try:
+                            log_path_state.value = None
+                        except Exception:
+                            pass
                         
                         return custom_id, sess_id, config
                     else:
@@ -738,6 +753,11 @@ class DialogueApp:
                         # 重置會話ID
                         sess_id = None
                         self.api_client.reset_session()
+                        # 清空每會話日誌覆寫路徑
+                        try:
+                            log_path_state.value = None
+                        except Exception:
+                            pass
                         
                         return char_id, sess_id, None
                 else:
@@ -751,6 +771,11 @@ class DialogueApp:
                     sess_id = None
                     self.api_client.reset_session()
                     logger.info("已重置會話ID以使用新的角色設定")
+                    # 清空每會話日誌覆寫路徑
+                    try:
+                        log_path_state.value = None
+                    except Exception:
+                        pass
                     
                     return char_id, sess_id, None
             
@@ -790,6 +815,11 @@ class DialogueApp:
                         sess_id = None
                         self.api_client.reset_session()
                         logger.info("已重置會話ID以使用新的角色設定")
+                        # 清空每會話日誌覆寫路徑
+                        try:
+                            log_path_state.value = None
+                        except Exception:
+                            pass
                         
                         return custom_id, sess_id, config
                     else:
@@ -801,6 +831,11 @@ class DialogueApp:
                         # 重置會話ID
                         sess_id = None
                         self.api_client.reset_session()
+                        # 清空每會話日誌覆寫路徑
+                        try:
+                            log_path_state.value = None
+                        except Exception:
+                            pass
                         
                         return char_id, sess_id, None
                 else:
@@ -814,6 +849,11 @@ class DialogueApp:
                     sess_id = None
                     self.api_client.reset_session()
                     logger.info("已重置會話ID以使用新的角色設定")
+                    # 清空每會話日誌覆寫路徑
+                    try:
+                        log_path_state.value = None
+                    except Exception:
+                        pass
                     
                     return char_id, sess_id, None
             
@@ -1268,6 +1308,11 @@ class DialogueApp:
             def _on_page_load_reset_session():
                 try:
                     self.api_client.reset_session()
+                except Exception:
+                    pass
+                # 清空每會話日誌覆寫路徑
+                try:
+                    log_path_state.value = None
                 except Exception:
                     pass
                 # 清空兩個會話狀態；不回傳其他尚未保證存在的狀態，避免綁定不匹配
