@@ -121,8 +121,8 @@ class DialogueApp:
             gr.Markdown("# 醫護對話系統 v0.2")
             gr.Markdown("使用此界面與虛擬病患進行對話。您可以選擇不同的角色進行對話。")
             
-            # 創建會話狀態（不使用 default，預設為第一個正式角色）
-            character_id = gr.State("2")  # 默認角色 ID 改為 2（王建中）
+            # 創建會話狀態（預設為第一個正式角色：王大華）
+            character_id = gr.State("1")
             session_id_text = gr.State(None)  # 文本對話會話 ID
             session_id_audio = gr.State(None)  # 語音對話會話 ID
             custom_config = gr.State(None)  # 自定義角色配置
@@ -747,7 +747,7 @@ class DialogueApp:
                     else:
                         # 配置錯誤，使用默認角色
                         logger.error(f"自定義角色配置無效，使用默認角色")
-                        char_id = text_character_map.get(char_name, "2")
+                        char_id = text_character_map.get(char_name, "1")
                         self.api_client.set_character(char_id)
                         
                         # 重置會話ID
@@ -763,7 +763,7 @@ class DialogueApp:
                 else:
                     # 使用預設角色
                     logger.info(f"使用預設角色名稱: {char_name}")
-                    char_id = text_character_map.get(char_name, "2")
+                    char_id = text_character_map.get(char_name, "1")
                     logger.info(f"預設角色ID: {char_id}")
                     self.api_client.set_character(char_id)
                     
@@ -825,7 +825,7 @@ class DialogueApp:
                     else:
                         # 配置錯誤，使用默認角色
                         logger.error(f"自定義角色配置無效，使用默認角色")
-                        char_id = audio_character_map.get(char_name, "2")
+                        char_id = audio_character_map.get(char_name, "1")
                         self.api_client.set_character(char_id)
                         
                         # 重置會話ID
@@ -841,7 +841,7 @@ class DialogueApp:
                 else:
                     # 使用預設角色
                     logger.info(f"使用預設角色名稱: {char_name}")
-                    char_id = audio_character_map.get(char_name, "2")
+                    char_id = audio_character_map.get(char_name, "1")
                     logger.info(f"預設角色ID: {char_id}")
                     self.api_client.set_character(char_id)
                     
