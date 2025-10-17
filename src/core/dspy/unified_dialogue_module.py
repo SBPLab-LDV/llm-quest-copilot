@@ -23,25 +23,32 @@ logger = logging.getLogger(__name__)
 
 JSON_OUTPUT_DIRECTIVE = (
     "[指示] 僅輸出單一 JSON 物件，至少包含欄位 reasoning, character_consistency_check, context_classification, "
-    "confidence, responses。必須維持合法 JSON 語法，"
+    "responses，並且必須同時輸出 core_question, prior_facts, context_judgement, meta_summary。必須維持合法 JSON 語法，"
     "所有鍵與值皆用雙引號，禁止輸出 None/null/True/False 或未封閉的字串。不得輸出任何分析或思考步驟，"
-    "請直接輸出 JSON 物件（不要附加除 JSON 以外的文字）。reasoning 使用一句極短敘述（不需精確字數）。"
+    "請直接輸出 JSON 物件（不要附加除 JSON 以外的文字）。reasoning 請簡短、自然，不必精確限制字數。"
     "responses 必須是一個長度為 5 的 JSON 陣列；每個元素為一句簡短、自然、彼此獨立且互斥的完整繁體中文句子，"
     "且每句都需直接回應 user_input 的核心名詞（例如涉及『醫師/巡房/發燒/藥物/檢查/排便/上廁所/點滴/瓶數/輸液』時，回應需自然提及相關詞彙），不可偏題。"
     "5 句需涵蓋不同的回應取向（例如：肯定、否定、不確定、提供具體但簡短的細節），"
     "禁止同義改寫或重覆語意，需更換不同名詞與動詞以確保差異化。"
     "若 user_input 為是否/有無/有沒有/…了嗎/…嗎 類二元問句，必須至少包含 1 句『肯定/有』與 1 句『否定/沒有』；"
     "其餘 3 句可呈現不同語氣與側重，提供具體但簡短的細節（避免冗長解釋與流程說明）。"
-    "若 user_input 為數值/計量問句（含『幾/多少/幾瓶/幾次/幾毫升…』），五句中需包含：\n"
-    "- 1 句『肯定數字』：僅在歷史/設定有明確事實時才直接引用該數字；\n"
-    "- 2 句『候選數字』：以『印象/大概/可能』修飾不同的小整數候選（如 1 或 2）；\n"
-    "- 其餘句子可採不同語氣與側重（例如重述、承認不確定或提供簡短細節），避免流程性說明。\n"
+    "若 user_input 為數值/計量問句（含『幾/多少/幾瓶/幾次/幾毫升…』），五句中可包含：\n"
+    "- 『肯定數字』：僅在歷史/設定有明確事實時才直接引用該數字；\n"
+    "- 『候選數字』：以『印象/大概/可能』修飾不同的小整數候選（如 1 或 2）；\n"
+    "- 其餘句子以不同語氣與側重提供簡短細節，避免流程性說明。\n"
     "不確定/記不清/再說一次 類句式最多允許 1 句；其餘句子提供實質內容。"
     "嚴禁在回覆或生成過程中計算或提及字數；嚴禁描述規則、分析或英文內容；"
     "嚴禁輸出無關的模板句（如『謝謝關心』『我會配合治療』『目前沒有發燒』）除非問題明確在問該事項。"
     "『數字/時間』不得臆測的限制僅適用於肯定數字或時間值；允許以『候選』形式提出不同數字供選。『有/沒有』的二元選項仍須同時產生以提供選擇。"
     "禁止添加 [[ ## field ## ]]、markdown 或任何額外文字，完整輸出後以 } 結束。"
+    "responses 必須為 JSON 陣列（雙引號字串的陣列），不可加整段引號或使用 Python list 表示法（不得使用單引號）。"
     "必須遵守上方提供的規則欄位（例如 term_usage_rules、response_style_rules、persona_voice_rules）。"
+    "\n\n[欄位定義 - 必須包含]\n"
+    "- core_question: 對 user_input 的核心重述，簡短自然的片語或短句。\n"
+    "- prior_facts: 與本次回答最相關的事實陣列（最多 3 條，簡短片語），來源於 character_details 與 conversation_history。\n"
+    "- context_judgement: 物件，讓模型自由推理情境與限制（避免死板欄位），包含：\n  signals: 從 character_details 抽取的關鍵信號（例如『目前接受治療場所=加護病房』『手術後定期檢查』『鼻胃管』等）之簡短片語陣列；\n  implications: 根據 signals 推理出的情境含意（例如『暫不口進食』『不可自行下床』『以手勢/眼神溝通』等）之簡短片語陣列；\n  generation_policy: 一句話概述生成應遵守的方針（簡短自然）。\n"
+    "- meta_summary: 物件（壓縮自我檢核），涵蓋：\n  directness_ok(bool), scenario_ok(bool), consistency_ok(bool), has_yes_and_no(bool，用於二元問句), numeric_support(\"confirmed\"/\"candidates\"/\"none\")。\n  notes(可選，極短片語陣列)。\n"
+    "所有 responses 必須與 context_judgement 的推論一致；若某些候選違反，請在內部刪除並只輸出合格的 5 句。"
 )
 
 PERSONA_REMINDER_TEMPLATE = (
@@ -78,8 +85,13 @@ class UnifiedPatientResponseSignature(dspy.Signature):
     reasoning = dspy.OutputField(desc="推理與一致性檢查")
     character_consistency_check = dspy.OutputField(desc="角色一致性 YES/NO")
     context_classification = dspy.OutputField(desc="情境分類 ID")
-    confidence = dspy.OutputField(desc="情境信心 0-1")
+    confidence = dspy.OutputField(desc="情境信心 0-1（可省略，由系統補值）")
     responses = dspy.OutputField(desc="五個病患回應")
+    # 推薦輸出：便於後處理與審核
+    core_question = dspy.OutputField(desc="對問題核心的簡短重述")
+    prior_facts = dspy.OutputField(desc="最多三條相關事實")
+    context_judgement = dspy.OutputField(desc="情境自由推理與生成方針")
+    meta_summary = dspy.OutputField(desc="壓縮自我檢核摘要")
     # state / dialogue_context / state_reasoning 由後處理自動補齊（不在 Signature 強制）
 
 
@@ -92,18 +104,12 @@ class UnifiedJSONAdapter(JSONAdapter):
         self.directive = directive.strip()
 
     def format_field_structure(self, signature: dspy.Signature) -> str:
-        lines = ["請遵守以下輸出規範:", self.directive]
-        descriptions = ["輸入欄位資訊:"]
-        for field_name, field_info in signature.input_fields.items():
-            extra = getattr(field_info, "json_schema_extra", {}) or {}
-            desc = extra.get("desc") or extra.get("description") or getattr(field_info, "description", None)
-            if not desc:
-                desc = translate_field_type(field_name, field_info)
-            descriptions.append(f"- {field_name}: {desc}")
-        return "\n".join(lines + ["", *descriptions]).strip()
+        # 精簡：避免重覆列出指令與欄位型別，減少提示冗長
+        return ""
 
     def user_message_output_requirements(self, signature: dspy.Signature) -> str:
-        return self.directive
+        # 僅在主請求訊息尾端附加指令，這裡不再重覆
+        return ""
 
     def format_user_message_content(
         self,
@@ -131,11 +137,7 @@ class UnifiedJSONAdapter(JSONAdapter):
         return "\n".join(chunk for chunk in messages if chunk).strip()
 
     def format_field_with_value(self, fields_with_values, role: str = "user") -> str:
-        if role == "user":
-            parts = []
-            for field, _ in fields_with_values.items():
-                parts.append(f"{field.name}: {translate_field_type(field.name, field.info)}")
-            return "\n".join(parts).strip()
+        # 使用預設格式，避免再度枚舉欄位名稱與型別
         return super().format_field_with_value(fields_with_values, role=role)
 
 
@@ -313,6 +315,10 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 logger.info(f"confidence: {getattr(unified_prediction, 'confidence', '')}")
                 logger.info(f"dialogue_context: {getattr(unified_prediction, 'dialogue_context', '')}")
                 logger.info(f"state_reasoning: {getattr(unified_prediction, 'state_reasoning', '')}")
+                logger.info(f"core_question: {getattr(unified_prediction, 'core_question', '')}")
+                logger.info(f"prior_facts: {getattr(unified_prediction, 'prior_facts', '')}")
+                logger.info(f"context_judgement: {getattr(unified_prediction, 'context_judgement', '')}")
+                logger.info(f"meta_summary: {getattr(unified_prediction, 'meta_summary', '')}")
                 # Show up to first 3 responses for brevity
                 logger.info(f"responses_preview: {_preview}")
             except Exception:
@@ -686,7 +692,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             return reminder
 
         # 固定歷史視窗：10 輪對話 ≈ 20 行（去除系統行）；不再動態調整
-        window_lines = 20
+        window_lines = 10
         # 準備非系統的原始對話行
         non_system = [x for x in conversation_history if isinstance(x, str) and not x.strip().startswith('[')]
         recent = non_system[-window_lines:]
