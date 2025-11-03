@@ -76,16 +76,29 @@ class GeminiClient:
             # 如果生成失敗，返回一個基本的錯誤回應
             return '{"responses": ["抱歉，我現在無法正確回應"],"state": "CONFUSED"}'
     
-    def transcribe_audio(self, audio_file_path: str) -> str:
+    def transcribe_audio(self, audio_file_path: str, mime_type: str = None) -> str:
         """將音頻文件轉換為文本，同時處理斷斷續續的語音並提供多個可能的完整句子選項
         
         Args:
-            audio_file_path: 音頻文件路徑 (WAV格式)
+            audio_file_path: 音頻文件路徑（支持 WAV, M4A, MP3, AAC 等格式）
+            mime_type: 音頻文件的 MIME 類型（可選，如果未提供則自動檢測）
             
         Returns:
             識別結果的 JSON 字符串，包含原始轉錄和多個可能完整句子選項
         """
         try:
+            # 如果未提供 MIME 類型，嘗試自動檢測
+            if mime_type is None:
+                from ..utils.audio_processor import get_audio_mime_type
+                mime_type = get_audio_mime_type(audio_file_path)
+                if mime_type is None:
+                    # 默認使用 audio/wav
+                    file_ext = os.path.splitext(audio_file_path)[1].lower()
+                    self.logger.warning(f"無法檢測音頻格式 {file_ext}，使用默認 MIME 類型 audio/wav")
+                    mime_type = "audio/wav"
+                else:
+                    self.logger.info(f"自動檢測到音頻格式: {mime_type}")
+            
             self.logger.info(f"===== 開始音頻轉文本 =====")
             self.logger.info(f"音頻文件: {audio_file_path}")
             
@@ -188,12 +201,14 @@ class GeminiClient:
                     {"text": prompt},
                     {
                         "inline_data": {
-                            "mime_type": "audio/wav",
+                            "mime_type": mime_type,  # 使用動態 MIME 類型
                             "data": base64.b64encode(audio_data).decode('utf-8')
                         }
                     }
                 ]
             }
+            
+            self.logger.info(f"使用 MIME 類型: {mime_type}")
             
             # 設定生成參數
             generation_config = {

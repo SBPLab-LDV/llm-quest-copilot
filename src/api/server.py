@@ -350,7 +350,7 @@ async def speech_to_text(audio_file: UploadFile) -> Dict[str, Any]:
     """將上傳的音頻文件轉換為文本，並提供多個可能的完整句子選項
 
     Args:
-        audio_file: 上傳的音頻文件
+        audio_file: 上傳的音頻文件（支持 WAV, M4A, MP3, AAC 等格式）
 
     Returns:
         包含原始識別和多個選項的字典
@@ -360,8 +360,14 @@ async def speech_to_text(audio_file: UploadFile) -> Dict[str, Any]:
     temp_files = []  # 追蹤需要刪除的臨時文件
     
     try:
-        # 保存上傳的文件
-        original_audio_path = f"temp_audio_{uuid.uuid4()}.wav"
+        # 從文件名獲取擴展名
+        import mimetypes
+        file_ext = os.path.splitext(audio_file.filename)[1].lower()
+        if not file_ext:
+            file_ext = '.wav'  # 默認擴展名
+        
+        # 保存上傳的文件，使用原始擴展名
+        original_audio_path = f"temp_audio_{uuid.uuid4()}{file_ext}"
         temp_files.append(original_audio_path)
         
         with open(original_audio_path, "wb") as f:
@@ -371,25 +377,36 @@ async def speech_to_text(audio_file: UploadFile) -> Dict[str, Any]:
         logger.debug(f"已保存臨時文件: {original_audio_path}")
         
         # 導入音頻處理工具
-        from ..utils.audio_processor import check_audio_format, preprocess_audio
+        from ..utils.audio_processor import check_audio_format, preprocess_audio, get_audio_mime_type
         
         # 檢查音頻格式
         if not check_audio_format(original_audio_path):
-            logger.warning(f"上傳的音頻格式無效或不是WAV格式: {original_audio_path}")
+            logger.warning(f"上傳的音頻格式無效或不支持: {original_audio_path}")
             return {
                 "original": "音頻格式無效",
-                "options": ["您好，上傳的音頻格式無效。請使用WAV格式錄音。"]
+                "options": ["您好，上傳的音頻格式不支持。支持的格式包括：WAV, M4A, MP3, AAC, OGG, FLAC。"]
             }
         
-        # 預處理音頻以優化識別
-        processed_audio_path = f"processed_audio_{uuid.uuid4()}.wav"
-        temp_files.append(processed_audio_path)
+        # 獲取 MIME 類型
+        mime_type = get_audio_mime_type(original_audio_path)
+        logger.debug(f"音頻 MIME 類型: {mime_type}")
         
-        processed_audio_path = preprocess_audio(
-            input_file=original_audio_path,
-            output_file=processed_audio_path
-        )
-        logger.debug(f"音頻預處理完成: {processed_audio_path}")
+        # 對於 WAV 格式，進行預處理以優化識別
+        # 對於其他格式，直接使用原始文件
+        if file_ext == '.wav':
+            processed_audio_path = f"processed_audio_{uuid.uuid4()}.wav"
+            temp_files.append(processed_audio_path)
+            
+            processed_audio_path = preprocess_audio(
+                input_file=original_audio_path,
+                output_file=processed_audio_path
+            )
+            logger.debug(f"WAV 音頻預處理完成: {processed_audio_path}")
+            final_audio_path = processed_audio_path
+        else:
+            # 其他格式直接使用
+            logger.debug(f"使用原始音頻文件: {original_audio_path}")
+            final_audio_path = original_audio_path
         
         # 使用 GeminiClient 進行語音識別
         try:
@@ -399,9 +416,9 @@ async def speech_to_text(audio_file: UploadFile) -> Dict[str, Any]:
             # 初始化 GeminiClient
             gemini_client = GeminiClient()
             
-            # 調用音頻識別方法，使用處理後的音頻
-            logger.info(f"使用 Gemini 進行音頻識別: {processed_audio_path}")
-            transcription_json = gemini_client.transcribe_audio(processed_audio_path)
+            # 調用音頻識別方法，使用處理後的音頻和正確的 MIME 類型
+            logger.info(f"使用 Gemini 進行音頻識別: {final_audio_path}, MIME: {mime_type}")
+            transcription_json = gemini_client.transcribe_audio(final_audio_path, mime_type=mime_type)
             
             # 解析識別結果 JSON
             try:
@@ -916,11 +933,17 @@ async def process_audio_input_dialogue(
     # 保存音頻到臨時檔
     temp_audio_file_path: Optional[str] = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_audio_file:
+        # 從文件名獲取擴展名
+        file_ext = os.path.splitext(audio_file.filename)[1].lower()
+        if not file_ext:
+            file_ext = '.wav'  # 默認擴展名
+        
+        # 使用原始擴展名創建臨時文件
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_audio_file:
             content = await audio_file.read()
             tmp_audio_file.write(content)
             temp_audio_file_path = tmp_audio_file.name
-        logger.debug(f"Saved temp audio file: {temp_audio_file_path}")
+        logger.debug(f"Saved temp audio file: {temp_audio_file_path} (format: {file_ext})")
     except Exception as e:
         logger.error(f"Failed saving uploaded audio: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"Failed to save audio file: {str(e)}")
@@ -928,8 +951,14 @@ async def process_audio_input_dialogue(
     # Gemini 轉錄
     try:
         from ..llm.gemini_client import GeminiClient
+        from ..utils.audio_processor import get_audio_mime_type
+        
+        # 獲取 MIME 類型
+        mime_type = get_audio_mime_type(temp_audio_file_path)
+        logger.debug(f"Detected MIME type: {mime_type}")
+        
         gemini_client = GeminiClient()
-        transcription_json = gemini_client.transcribe_audio(temp_audio_file_path)
+        transcription_json = gemini_client.transcribe_audio(temp_audio_file_path, mime_type=mime_type)
         try:
             transcription = json.loads(transcription_json)
         except json.JSONDecodeError:
