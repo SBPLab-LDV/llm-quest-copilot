@@ -958,14 +958,14 @@ async def process_audio_input_dialogue(
         logger.debug(f"Detected MIME type: {mime_type}")
         
         gemini_client = GeminiClient()
-        transcription_json = gemini_client.transcribe_audio(temp_audio_file_path, mime_type=mime_type)
+        transcription_json = gemini_client.transcribe_audio(temp_audio_file_path, mime_type=mime_type, mode="general")
         try:
             transcription = json.loads(transcription_json)
         except json.JSONDecodeError:
             transcription = {"original": transcription_json, "options": [transcription_json]}
         options = transcription.get("options") or []
         original_text = transcription.get("original") or (options[0] if options else "")
-        text_input = options[0] if options else original_text
+        text_input = original_text # 在 general 模式下，直接使用 original_text
         if not text_input:
             raise HTTPException(status_code=400, detail="Unable to transcribe audio")
         logger.info(f"Gemini transcription selected text: '{text_input}' (options={len(options)})")
