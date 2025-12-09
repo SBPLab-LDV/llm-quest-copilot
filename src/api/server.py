@@ -1461,21 +1461,27 @@ async def process_audio_input_dialogue(
     # Gemini 轉錄
     try:
         from ..llm.gemini_client import GeminiClient
-        from ..utils.audio_processor import get_audio_mime_type
-        
-        # 獲取 MIME 類型
-        mime_type = get_audio_mime_type(temp_audio_file_path)
-        logger.debug(f"Detected MIME type: {mime_type}")
         
         gemini_client = GeminiClient()
-        transcription_json = gemini_client.transcribe_audio(temp_audio_file_path, mime_type=mime_type, mode="general")
+        
+        # 嘗試從 session 中獲取上下文以增強識別準確度
+        dm = session.get("dialogue_manager") if session else None
+        character_obj = getattr(dm, 'character', None) if dm else None
+        history_list = getattr(dm, 'conversation_history', None) if dm else None
+        
+        transcription_json = gemini_client.transcribe_audio(
+            temp_audio_file_path,
+            character=character_obj,
+            conversation_history=history_list,
+            session_id=session_id
+        )
         try:
             transcription = json.loads(transcription_json)
         except json.JSONDecodeError:
             transcription = {"original": transcription_json, "options": [transcription_json]}
         options = transcription.get("options") or []
         original_text = transcription.get("original") or (options[0] if options else "")
-        text_input = original_text # 在 general 模式下，直接使用 original_text
+        text_input = original_text 
         if not text_input:
             raise HTTPException(status_code=400, detail="Unable to transcribe audio")
         logger.info(f"Gemini transcription selected text: '{text_input}' (options={len(options)})")
