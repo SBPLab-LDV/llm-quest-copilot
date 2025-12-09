@@ -12,3 +12,4 @@ python-multipart>=0.0.6
 SpeechRecognition>=3.10.0
 gradio>=4.0.0
 pyaudio
+dspy-ai>=3.0.4
