@@ -9,9 +9,9 @@ class GeminiClient:
     def __init__(self):
         config = load_config()
         genai.configure(api_key=config['google_api_key'])
-        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        self.model = genai.GenerativeModel('gemini-2.0-flash')
         # Create a multimodal model instance for audio processing
-        self.multimodal_model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        self.multimodal_model = genai.GenerativeModel('gemini-2.0-flash')
         self.logger = logging.getLogger(__name__)
         
     def generate_response(self, prompt: str) -> str:
