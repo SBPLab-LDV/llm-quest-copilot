@@ -15,20 +15,75 @@ from typing import Tuple, Optional
 # 設置日誌
 logger = logging.getLogger(__name__)
 
-def check_audio_format(file_path: str) -> bool:
-    """檢查音頻文件是否為有效的 WAV 格式
+# 支持的音頻格式及其 MIME 類型
+SUPPORTED_AUDIO_FORMATS = {
+    '.wav': 'audio/wav',
+    '.m4a': 'audio/mp4',
+    '.mp4': 'audio/mp4',
+    '.mp3': 'audio/mp3',
+    '.aac': 'audio/aac',
+    '.ogg': 'audio/ogg',
+    '.flac': 'audio/flac',
+    '.webm': 'audio/webm',
+}
+
+def get_audio_mime_type(file_path: str) -> Optional[str]:
+    """根據文件擴展名獲取音頻 MIME 類型
     
     Args:
         file_path: 音頻文件路徑
     
     Returns:
-        是否為有效的 WAV 格式
+        MIME 類型字符串，如果格式不支持則返回 None
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+    return SUPPORTED_AUDIO_FORMATS.get(ext)
+
+def check_audio_format(file_path: str) -> bool:
+    """檢查音頻文件是否為支持的格式
+    
+    支持的格式: WAV, M4A, MP3, AAC, OGG, FLAC, WebM
+    
+    Args:
+        file_path: 音頻文件路徑
+    
+    Returns:
+        是否為支持的音頻格式
     """
     try:
-        # 使用 scipy.io.wavfile 讀取音頻
-        sample_rate, audio_data = wavfile.read(file_path)
-        logger.debug(f"音頻檢查: 採樣率={sample_rate}Hz, 形狀={audio_data.shape}")
+        # 檢查文件是否存在
+        if not os.path.exists(file_path):
+            logger.error(f"音頻文件不存在: {file_path}")
+            return False
+        
+        # 檢查文件大小
+        file_size = os.path.getsize(file_path)
+        if file_size == 0:
+            logger.error(f"音頻文件為空: {file_path}")
+            return False
+        
+        # 獲取文件擴展名
+        ext = os.path.splitext(file_path)[1].lower()
+        
+        # 檢查是否在支持的格式列表中
+        if ext not in SUPPORTED_AUDIO_FORMATS:
+            logger.warning(f"不支持的音頻格式: {ext}. 支持的格式: {', '.join(SUPPORTED_AUDIO_FORMATS.keys())}")
+            return False
+        
+        mime_type = SUPPORTED_AUDIO_FORMATS[ext]
+        logger.debug(f"音頻格式檢查通過: {file_path}, 格式={ext}, MIME={mime_type}, 大小={file_size/1024:.2f}KB")
+        
+        # 對於 WAV 格式，額外檢查是否能正確讀取
+        if ext == '.wav':
+            try:
+                sample_rate, audio_data = wavfile.read(file_path)
+                logger.debug(f"WAV 文件詳細信息: 採樣率={sample_rate}Hz, 形狀={audio_data.shape}")
+            except Exception as e:
+                logger.warning(f"WAV 文件讀取警告: {e}")
+                # 即使讀取失敗，如果文件存在且有大小，仍然嘗試處理
+        
         return True
+        
     except Exception as e:
         logger.error(f"音頻格式檢查失敗: {e}")
         return False
