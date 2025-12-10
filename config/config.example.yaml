@@ -1,5 +1,39 @@
 # 複製此檔案為 config.yaml 並填入你的 API key
-google_api_key: "your-api-key-here" 
-input_mode: "voice"  # 可選值: "text" 或 "voice"
-save_recordings: false  # 控制是否保存錄音檔案
+debug_mode: false
+dspy:
+  provider: gemini
+  ab_testing:
+    enabled: false
+    percentage: 50
+  caching:
+    enabled: true
+    ttl: 3600
+  enabled: true
+  max_output_tokens: 768
+  model: gemini-2.5-flash
+  optimize: false
+  temperature: 0.7
+  top_k: 40
+  top_p: 0.8
+  use_unified_module: true
+  enable_sensitive_rewrite: false
+  ollama:
+    base_url: http://localhost:11434
+    model: gpt-oss:20b
+    timeout: 120
+google_api_key: "your-api-key-here"
+input_mode: voice
+save_recordings: false
+logging:
+  llm_raw: true
+  max_chars: 8000
+  audio_log_b64: false
+audio:
+  use_context: true
+  prompt_via_dspy: true
+  option_count: 4
+  dspy:
+    normalize: false
+    evaluate_only: false
+    auto_select: false
 debug_mode: false  # 控制是否顯示除錯訊息
