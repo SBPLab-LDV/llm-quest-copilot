@@ -39,7 +39,7 @@ JSON_OUTPUT_DIRECTIVE = (
     "- 『候選數字』：以『印象/大概/可能』修飾不同的小整數候選（如 1 或 2）；\n"
     "- 其餘句子以不同語氣與側重提供簡短細節，避免流程性說明。\n"
     "不確定/記不清/再說一次 類句式最多允許 1 句；其餘句子提供實質內容。"
-    "嚴禁在回覆或生成過程中計算或提及字數；嚴禁描述規則、分析或英文內容；"
+    "嚴禁在回覆或生成過程中計算或提及字數；嚴禁描述規則、分析或英文內容；嚴禁在 responses 中包含任何括號描述、肢體動作、表情或舞台指示（如『（指著...）』『（搖頭）』『（皺眉）』），只輸出病患實際說出口的話語；"
     "嚴禁輸出無關的模板句（如『謝謝關心』『我會配合治療』『目前沒有發燒』）除非問題明確在問該事項。"
     "『數字/時間』不得臆測的限制僅適用於肯定數字或時間值；允許以『候選』形式提出不同數字供選。『有/沒有』的二元選項仍須同時產生以提供選擇。"
     "禁止添加 [[ ## field ## ]]、markdown 或任何額外文字，完整輸出後以 } 結束。"
@@ -53,7 +53,7 @@ JSON_OUTPUT_DIRECTIVE = (
     "- meta_summary: 物件（壓縮自我檢核），涵蓋：\n  directness_ok(bool), scenario_ok(bool), consistency_ok(bool: 需同時檢查 character_details 與 conversation_history),\n  has_yes_and_no(bool，用於二元問句), numeric_support(\"confirmed\"/\"candidates\"/\"none\"),\n  history_anchor(bool，可選，是否引用了最近對話事實)；\n  notes(可選，若發現與 conversation_history 不一致，請以極短片語指出)。\n"
     "【視角規範】reasoning 與 context_judgement.generation_policy 必須以『病患回應選項生成』的角度表述；\n"
     "禁止使用『詢問／請您／建議／安排／提醒／我們會』等醫護或系統視角動詞。\n"
-    "generation_policy 應描述生成病患第一人稱選項的策略；若病患無法說話，請明示以『手勢／眼神／按鈕』等病患表達方式呈現。\n"
+    "generation_policy 應描述生成病患第一人稱選項的策略。\n"
     "所有 responses 必須與 context_judgement 的推論一致；若某些候選違反，請在內部刪除並只輸出合格的 5 句。"
 )
 
@@ -92,7 +92,7 @@ class UnifiedPatientResponseSignature(dspy.Signature):
     character_consistency_check = dspy.OutputField(desc="角色一致性 YES/NO")
     context_classification = dspy.OutputField(desc="情境分類 ID")
     confidence = dspy.OutputField(desc="情境信心 0-1（可省略，由系統補值）")
-    responses = dspy.OutputField(desc="五個病患回應")
+    responses = dspy.OutputField(desc="五個病患回應，嚴禁包含任何括號、動作描述、肢體語言或省略號（...），只輸出流暢完整的純口語句子")
     # 推薦輸出：便於後處理與審核
     core_question = dspy.OutputField(desc="對問題核心的簡短重述")
     prior_facts = dspy.OutputField(desc="最多三條相關事實")
