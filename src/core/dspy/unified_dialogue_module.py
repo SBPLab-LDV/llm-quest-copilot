@@ -27,14 +27,14 @@ JSON_OUTPUT_DIRECTIVE = (
     "所有鍵與值皆用雙引號，禁止輸出 None/null/True/False 或未封閉的字串。不得輸出任何分析或思考步驟，"
     "請直接輸出 JSON 物件（不要附加除 JSON 以外的文字）。reasoning 請簡短、自然，不必精確限制字數。"
     "reasoning 請簡短說明：如何根據 core_question 與（若存在且相關）1 條來自 conversation_history 最近視窗的 prior_fact，"
-    "以及 context_judgement.generation_policy 來產生這 5 句回應。"
-    "responses 必須是一個長度為 5 的 JSON 陣列；每個元素為一句簡短、自然、彼此獨立且互斥的完整繁體中文句子，"
+    "以及 context_judgement.generation_policy 來產生這 4 句回應。"
+    "responses 必須是一個長度為 4 的 JSON 陣列；每個元素為一句簡短、自然、彼此獨立且互斥的完整繁體中文句子，"
     "且每句都需直接回應 user_input 的核心名詞（例如涉及『醫師/巡房/發燒/藥物/檢查/排便/上廁所/點滴/瓶數/輸液』時，回應需自然提及相關詞彙），不可偏題。"
-    "5 句需涵蓋不同的回應取向（例如：肯定、否定、不確定、提供具體但簡短的細節），"
+    "4 句需涵蓋不同的回應取向（例如：肯定、否定、不確定、提供具體但簡短的細節），"
     "禁止同義改寫或重覆語意，需更換不同名詞與動詞以確保差異化。"
     "若 user_input 為是否/有無/有沒有/…了嗎/…嗎 類二元問句，必須至少包含 1 句『肯定/有』與 1 句『否定/沒有』；"
-    "其餘 3 句可呈現不同語氣與側重，提供具體但簡短的細節（避免冗長解釋與流程說明）。"
-    "若 user_input 為數值/計量問句（含『幾/多少/幾瓶/幾次/幾毫升…』），五句中可包含：\n"
+    "其餘 2 句可呈現不同語氣與側重，提供具體但簡短的細節（避免冗長解釋與流程說明）。"
+    "若 user_input 為數值/計量問句（含『幾/多少/幾瓶/幾次/幾毫升…』），四句中可包含：\n"
     "- 『肯定數字』：僅在歷史/設定有明確事實時才直接引用該數字；\n"
     "- 『候選數字』：以『印象/大概/可能』修飾不同的小整數候選（如 1 或 2）；\n"
     "- 其餘句子以不同語氣與側重提供簡短細節，避免流程性說明。\n"
@@ -54,7 +54,7 @@ JSON_OUTPUT_DIRECTIVE = (
     "【視角規範】reasoning 與 context_judgement.generation_policy 必須以『病患回應選項生成』的角度表述；\n"
     "禁止使用『詢問／請您／建議／安排／提醒／我們會』等醫護或系統視角動詞。\n"
     "generation_policy 應描述生成病患第一人稱選項的策略。\n"
-    "所有 responses 必須與 context_judgement 的推論一致；若某些候選違反，請在內部刪除並只輸出合格的 5 句。"
+    "所有 responses 必須與 context_judgement 的推論一致；若某些候選違反，請在內部刪除並只輸出合格的 4 句。"
 )
 
 PERSONA_REMINDER_TEMPLATE = (
@@ -92,7 +92,7 @@ class UnifiedPatientResponseSignature(dspy.Signature):
     character_consistency_check = dspy.OutputField(desc="角色一致性 YES/NO")
     context_classification = dspy.OutputField(desc="情境分類 ID")
     confidence = dspy.OutputField(desc="情境信心 0-1（可省略，由系統補值）")
-    responses = dspy.OutputField(desc="五個病患回應，嚴禁包含任何括號、動作描述、肢體語言或省略號（...），只輸出流暢完整的純口語句子")
+    responses = dspy.OutputField(desc="四個病患回應，嚴禁包含任何括號、動作描述、肢體語言或省略號（...），只輸出流暢完整的純口語句子")
     # 推薦輸出：便於後處理與審核
     core_question = dspy.OutputField(desc="對問題核心的簡短重述")
     prior_facts = dspy.OutputField(desc="最多三條相關事實")
@@ -406,7 +406,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                     # 使用救回的 responses，其他欄位以預設補齊
                     return dspy.Prediction(
                         user_input=user_input,
-                        responses=[str(x).strip() for x in salv_responses if str(x).strip()][:5] or [
+                        responses=[str(x).strip() for x in salv_responses if str(x).strip()][:4] or [
                             "語言模型伺服器超出限制，請聯繫管理人員。",
                             "語言模型伺服器超出限制，請聯繫管理人員",
                             "語言模型伺服器超出限制，請聯繫管理人員",
@@ -464,12 +464,12 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 return None
             candidate = data.get('responses')
             if isinstance(candidate, list):
-                return [str(x) for x in candidate[:5]]
+                return [str(x) for x in candidate[:4]]
             if isinstance(candidate, str):
                 try:
                     parsed = json.loads(candidate)
                     if isinstance(parsed, list):
-                        return [str(x) for x in parsed[:5]]
+                        return [str(x) for x in parsed[:4]]
                 except Exception:
                     return [candidate]
             return None
@@ -510,8 +510,8 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                             flattened.append(text_item)
 
                 if flattened:
-                    return flattened[:5]
-                return [str(x) for x in responses_text[:5]]
+                    return flattened[:4]
+                return [str(x) for x in responses_text[:4]]
 
             if isinstance(responses_text, dict):
                 extracted = _extract_from_dict(responses_text)
@@ -523,7 +523,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 try:
                     parsed = json.loads(responses_text)
                     if isinstance(parsed, list):
-                        return [str(x) for x in parsed[:5]]
+                        return [str(x) for x in parsed[:4]]
                     if isinstance(parsed, dict):
                         extracted = _extract_from_dict(parsed)
                         if extracted is not None:
@@ -531,7 +531,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 except json.JSONDecodeError:
                     # 不是 JSON，按行分割
                     lines = [line.strip() for line in responses_text.split('\n') if line.strip()]
-                    return lines[:5]
+                    return lines[:4]
             
             return [str(responses_text)]
         except Exception as e:
@@ -546,12 +546,12 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 return None
             candidate = data.get('responses')
             if isinstance(candidate, list):
-                return [str(x) for x in candidate[:5]]
+                return [str(x) for x in candidate[:4]]
             if isinstance(candidate, str):
                 try:
                     parsed = json.loads(candidate)
                     if isinstance(parsed, list):
-                        return [str(x) for x in parsed[:5]]
+                        return [str(x) for x in parsed[:4]]
                 except Exception:
                     return [candidate]
             return None
@@ -574,15 +574,15 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                         try:
                             parsed_inner = json.loads(inner)
                             if isinstance(parsed_inner, list):
-                                return [str(x) for x in parsed_inner[:5] if str(x).strip()]
+                                return [str(x) for x in parsed_inner[:4] if str(x).strip()]
                         except Exception:
                             pass
                 # 若為 [[...]] 形式，展平為單層
                 if len(responses) == 1 and isinstance(responses[0], list):
-                    return [str(x) for x in responses[0][:5] if str(x).strip()]
+                    return [str(x) for x in responses[0][:4] if str(x).strip()]
                 cleaned = [str(x).strip() for x in responses if str(x).strip()]
                 if cleaned:
-                    return cleaned[:5]
+                    return cleaned[:4]
                 return []
             
             if isinstance(responses, dict):
@@ -596,14 +596,14 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                     parsed = json.loads(responses)
                     if isinstance(parsed, list):
                         cleaned = [str(x).strip() for x in parsed if str(x).strip()]
-                        return cleaned[:5]
+                        return cleaned[:4]
                     if isinstance(parsed, dict):
                         extracted = _extract_from_dict(parsed)
                         if extracted is not None:
                             return extracted
                 except json.JSONDecodeError:
                     lines = [line.strip() for line in responses.split('\n') if line.strip()]
-                    return lines[:5]
+                    return lines[:4]
             
             text = str(responses).strip()
             return [text] if text else []

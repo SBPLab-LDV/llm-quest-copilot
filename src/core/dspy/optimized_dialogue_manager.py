@@ -354,7 +354,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 else:
                     normalized_list.append(str(item))
 
-            responses = normalized_list[:5]
+            responses = normalized_list[:4]
             responses = self._filter_chinese_responses(responses)
 
             return {
@@ -574,7 +574,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                     "⚠️ Removed non-Chinese responses: %s",
                     [r for r in responses if r not in filtered],
                 )
-            return filtered[:5]
+            return filtered[:4]
         return responses
 
     def _attempt_sensitive_rewrite(self, original_question: str, base_prediction=None):
@@ -655,7 +655,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
 
             rewritten_responses = response_data.get("responses", [])
             enriched = [notice] + rewritten_responses
-            response_data["responses"] = enriched[:5]
+            response_data["responses"] = enriched[:4]
             return response_data
 
         except Exception as exc:  # pragma: no cover - defensive logging

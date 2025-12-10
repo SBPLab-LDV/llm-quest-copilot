@@ -370,15 +370,15 @@ class DSPyDialogueModule(dspy.Module):
                 try:
                     parsed = json.loads(responses)
                     if isinstance(parsed, list):
-                        return parsed[:5]  # 最多5個回應
+                        return parsed[:4]  # 最多5個回應
                     else:
                         return [responses]
                 except json.JSONDecodeError:
                     # 不是 JSON，按行分割
                     lines = [line.strip() for line in responses.split('\n') if line.strip()]
-                    return lines[:5]
+                    return lines[:4]
             elif isinstance(responses, list):
-                return [str(r) for r in responses[:5]]
+                return [str(r) for r in responses[:4]]
             else:
                 return [str(responses)]
                 
