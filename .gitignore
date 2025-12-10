@@ -20,3 +20,5 @@ markitdown/
 # Audio assets (avoid committing mp3)
 *.mp3
 assets/*.mp3
+logs/debug/
+logs/api/
