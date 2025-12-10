@@ -222,17 +222,26 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ### Docker Container 執行
 **所有 Python 程式碼必須透過 Docker container 執行**
+
+#### 正式機（對外服務）
+- Container 名稱: `dialogue-server`
+- 執行方式: `docker exec dialogue-server python /app/<script_name>.py`
+- 工作目錄對應: 本地 `/home/sbplab/llm-quest-copilot-main` 對應到容器內 `/app`
+- API Port: 8000（內部）、7860（UI）
+
+#### 測試機（開發測試）
 - Container 名稱: `dialogue-server-jiawei-dspy`
 - 執行方式: `docker exec dialogue-server-jiawei-dspy python /app/<script_name>.py`
 - 工作目錄對應: 本地 `/home/sbplab/jiawei/llm-quest-dspy` 對應到容器內 `/app`
+- API Port: 18000（內部）、17860（UI）
 
 範例:
 ```bash
-# 執行測試腳本
+# 在測試機執行測試腳本
 docker exec dialogue-server-jiawei-dspy python /app/test-config-debug.py
 
-# 執行 API 服務器
-docker exec dialogue-server-jiawei-dspy python /app/api_server.py
+# 在正式機檢查服務
+docker exec dialogue-server python -c "import requests; print(requests.get('http://localhost:8000/health').json())"
 
 # 執行其他 Python 腳本
 docker exec dialogue-server-jiawei-dspy python /app/<script_name>.py
@@ -299,9 +308,91 @@ docker exec dialogue-server-jiawei-dspy python /app/<script_name>.py
 4. **角色系統**: 支援動態角色配置，可即時傳入 character_config
 5. **語言**: 專案主要使用繁體中文介面和訊息
 
-## Git 分支
-- 當前分支: `feature/dspy-refactor`
-- 主分支: `main`（通常用於 PR）
+## Git 分支與開發流程
+
+### 環境架構
+
+| 環境 | 容器名稱 | 掛載路徑 | Port | 用途 |
+|------|----------|----------|------|------|
+| **正式機** | `dialogue-server` | `/home/sbplab/llm-quest-copilot-main` | 7860/8000 | 對外服務 |
+| **測試機** | `dialogue-server-jiawei-dspy` | `/home/sbplab/jiawei/llm-quest-dspy` | 17860/18000 | 開發測試 |
+
+### 分支策略
+
+```
+main                     ← 正式機運行（穩定、已驗證）
+    │
+    ├── feature/*        ← 新功能開發
+    ├── fix/*            ← 錯誤修復
+    └── experiment/*     ← 實驗性變更（可能不合併）
+```
+
+- **main**: 正式運行版本，正式機 (`dialogue-server`) 使用此分支
+- **feature/***: 新功能開發分支
+- **fix/***: 錯誤修復分支
+- **experiment/***: 實驗性變更，可能不會合併到 main
+
+### 標準開發流程
+
+#### 1. 開始新功能開發（在測試機）
+```bash
+cd /home/sbplab/jiawei/llm-quest-dspy
+git fetch origin main
+git checkout -b feature/新功能名稱 origin/main
+```
+
+#### 2. 開發與測試
+```bash
+# 在測試機容器中執行測試
+docker exec dialogue-server-jiawei-dspy python /app/test_xxx.py
+
+# 提交變更
+git add .
+git commit -m "feat: 功能描述"
+git push origin feature/新功能名稱
+```
+
+#### 3. 合併到 main（建立 PR 或直接合併）
+```bash
+# 方式 A: 在 GitHub 建立 Pull Request → main（推薦）
+# 方式 B: 直接合併（適用於緊急修復）
+git checkout main
+git merge feature/新功能名稱
+git push origin main
+```
+
+#### 4. 更新正式機
+```bash
+cd /home/sbplab/llm-quest-copilot-main
+git pull origin main
+# 服務會自動使用新程式碼（因為是掛載目錄）
+```
+
+### 配置檔案管理
+
+| 檔案 | Git 追蹤 | 說明 |
+|------|----------|------|
+| `config/config.yaml` | ❌ 不追蹤 | 本地配置（含 API key） |
+| `config/config.example.yaml` | ✅ 追蹤 | 配置模板 |
+| `logs/debug/*`, `logs/api/*` | ❌ 不追蹤 | Session logs |
+
+**重要**: 每個環境需要各自的 `config.yaml`，從 `config.example.yaml` 複製並填入正確的 API key。
+
+### 容器管理命令
+
+```bash
+# 正式機
+docker ps | grep dialogue-server
+docker logs dialogue-server
+docker restart dialogue-server
+
+# 測試機
+docker ps | grep dialogue-server-jiawei-dspy
+docker logs dialogue-server-jiawei-dspy
+docker exec -it dialogue-server-jiawei-dspy bash
+```
+
+
 
 
 ## 除錯和測試
