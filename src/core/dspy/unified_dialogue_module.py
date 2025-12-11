@@ -29,7 +29,7 @@ JSON_OUTPUT_DIRECTIVE = (
     "reasoning 請簡短說明：如何根據 core_question 與（若存在且相關）1 條來自 conversation_history 最近視窗的 prior_fact，"
     "以及 context_judgement.generation_policy 來產生這 4 句回應。"
     "responses 必須是一個長度為 4 的 JSON 陣列；每個元素為一句簡短、自然、彼此獨立且互斥的完整繁體中文句子，"
-    "且每句都需直接回應 user_input 的核心名詞（例如涉及『醫師/巡房/發燒/藥物/檢查/排便/上廁所/點滴/瓶數/輸液』時，回應需自然提及相關詞彙），不可偏題。"
+    "且每句都需直接回應 user_input 的核心主題，自然提及相關詞彙，不可偏題或答非所問。"
     "4 句需涵蓋不同的回應取向（例如：肯定、否定、不確定、提供具體但簡短的細節），"
     "禁止同義改寫或重覆語意，需更換不同名詞與動詞以確保差異化。"
     "若 user_input 為是否/有無/有沒有/…了嗎/…嗎 類二元問句，必須至少包含 1 句『肯定/有』與 1 句『否定/沒有』；"
@@ -39,8 +39,8 @@ JSON_OUTPUT_DIRECTIVE = (
     "- 『候選數字』：以『印象/大概/可能』修飾不同的小整數候選（如 1 或 2）；\n"
     "- 其餘句子以不同語氣與側重提供簡短細節，避免流程性說明。\n"
     "不確定/記不清/再說一次 類句式最多允許 1 句；其餘句子提供實質內容。"
-    "嚴禁在回覆或生成過程中計算或提及字數；嚴禁描述規則、分析或英文內容；嚴禁在 responses 中包含任何括號描述、肢體動作、表情或舞台指示（如『（指著...）』『（搖頭）』『（皺眉）』），只輸出病患實際說出口的話語；"
-    "嚴禁輸出無關的模板句（如『謝謝關心』『我會配合治療』『目前沒有發燒』）除非問題明確在問該事項。"
+    "嚴禁在回覆或生成過程中計算或提及字數；嚴禁描述規則、分析或英文內容；嚴禁在 responses 中包含任何括號描述（如肢體動作、表情或舞台指示），只輸出病患實際說出口的話語；"
+    "嚴禁輸出與當前問題無關的模板句（如客套語、表態語）除非問題明確在問該事項。"
     "『數字/時間』不得臆測的限制僅適用於肯定數字或時間值；允許以『候選』形式提出不同數字供選。『有/沒有』的二元選項仍須同時產生以提供選擇。"
     "禁止添加 [[ ## field ## ]]、markdown 或任何額外文字，完整輸出後以 } 結束。"
     "responses 必須為 JSON 陣列（雙引號字串的陣列），不可加整段引號或使用 Python list 表示法（不得使用單引號）。"
@@ -49,12 +49,32 @@ JSON_OUTPUT_DIRECTIVE = (
     "- core_question: 對 user_input 的核心重述，簡短自然的片語或短句。\n"
     "- prior_facts: 與本次回答最相關的事實陣列（最多 3 條，簡短片語），來源於 character_details 與 conversation_history；"
     "  至少嘗試包含 1 條源自最近對話視窗的事實；若近期對話沒有合適事實，請不要硬湊或臆造，可僅列出 character_details 的事實。\n"
-    "- context_judgement: 物件，讓模型自由推理情境與限制（避免死板欄位），包含：\n  signals: 從 character_details 抽取的關鍵信號（例如『目前接受治療場所=加護病房』『手術後定期檢查』『鼻胃管』等）之簡短片語陣列；\n  implications: 根據 signals 推理出的情境含意（例如『暫不口進食』『不可自行下床』『以手勢/眼神溝通』等）之簡短片語陣列；\n  generation_policy: 一句話概述生成應遵守的方針（簡短自然）。\n"
-    "- meta_summary: 物件（壓縮自我檢核），涵蓋：\n  directness_ok(bool), scenario_ok(bool), consistency_ok(bool: 需同時檢查 character_details 與 conversation_history),\n  has_yes_and_no(bool，用於二元問句), numeric_support(\"confirmed\"/\"candidates\"/\"none\"),\n  history_anchor(bool，可選，是否引用了最近對話事實)；\n  notes(可選，若發現與 conversation_history 不一致，請以極短片語指出)。\n"
+    "- context_judgement: 物件，讓模型自由推理情境與限制（避免死板欄位），包含：\n"
+    "  signals: 從 character_details 抽取的關鍵醫療狀態與設定，以簡短片語陣列呈現；\n"
+    "  implications: 根據 signals 推理出的行為限制或情境含意，以簡短片語陣列呈現；\n"
+    "  premise_check: 物件（問題前提驗證），包含：\n"
+    "    question_assumes: 問題中隱含的前提假設（如手術部位、疾病類型、治療方式、用藥等），簡短片語；\n"
+    "    medical_facts: 與該前提相關的病歷事實（從 character_details 抽取），簡短片語；\n"
+    "    match: true/false（前提是否與病歷相符）；\n"
+    "    mismatch_detail: 若不符，簡述矛盾點（可選）。\n"
+    "  generation_policy: 一句話概述生成應遵守的方針（需考量 premise_check 結果）。\n"
+    "- meta_summary: 物件（壓縮自我檢核），涵蓋：\n"
+    "  directness_ok(bool), scenario_ok(bool), consistency_ok(bool: 需同時檢查 character_details 與 conversation_history),\n"
+    "  premise_ok(bool: 問題前提是否與病歷相符，與 premise_check.match 一致),\n"
+    "  has_yes_and_no(bool，用於二元問句), numeric_support(\"confirmed\"/\"candidates\"/\"none\"),\n"
+    "  history_anchor(bool，可選，是否引用了最近對話事實)；\n"
+    "  notes(可選，若 premise_ok=false 或發現不一致，請以極短片語指出矛盾並說明回應策略)。\n"
     "【視角規範】reasoning 與 context_judgement.generation_policy 必須以『病患回應選項生成』的角度表述；\n"
     "禁止使用『詢問／請您／建議／安排／提醒／我們會』等醫護或系統視角動詞。\n"
     "generation_policy 應描述生成病患第一人稱選項的策略。\n"
-    "所有 responses 必須與 context_judgement 的推論一致；若某些候選違反，請在內部刪除並只輸出合格的 4 句。"
+    "所有 responses 必須與 context_judgement 的推論一致；若某些候選違反，請在內部刪除並只輸出合格的 4 句。\n"
+    "【問題前提驗證】當問題中隱含的前提假設（如手術部位、疾病類型、用藥、治療方式）與 character_details 不符時：\n"
+    "- premise_check.match 必須設為 false；\n"
+    "- meta_summary.premise_ok 必須設為 false；\n"
+    "- character_consistency_check 應設為 NO；\n"
+    "- responses 應以病患視角質疑或澄清錯誤前提，指出實際病歷事實；\n"
+    "- 至少 2 句應質疑前提，其餘可表達困惑或請對方確認；\n"
+    "- 禁止順著錯誤前提回答，必須先澄清事實。"
 )
 
 PERSONA_REMINDER_TEMPLATE = (
@@ -89,7 +109,7 @@ class UnifiedPatientResponseSignature(dspy.Signature):
 
     # 輸出欄位（必填）
     reasoning = dspy.OutputField(desc="推理與一致性檢查")
-    character_consistency_check = dspy.OutputField(desc="角色一致性 YES/NO")
+    character_consistency_check = dspy.OutputField(desc="角色一致性 YES/NO（包含問題前提與病歷的一致性檢查，若前提不符應為 NO）")
     context_classification = dspy.OutputField(desc="情境分類 ID")
     confidence = dspy.OutputField(desc="情境信心 0-1（可省略，由系統補值）")
     responses = dspy.OutputField(desc="四個病患回應，嚴禁包含任何括號、動作描述、肢體語言或省略號（...），只輸出流暢完整的純口語句子")
