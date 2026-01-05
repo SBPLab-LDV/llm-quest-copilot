@@ -1,0 +1,190 @@
+scenario: 病房日常
+
+questions:
+  - question: "住院期間有人照顧你嗎？"
+    keywords:
+      - 照顧者
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "有，我的家人/外傭"
+      - "有，看護"
+      - "沒有，看護申請中"
+      - "沒有，可以幫我問問輔導員或是社工嗎？"
+      - "沒有，我自己就可以了"
+
+  - question: "你的家人/看護/外傭去哪裡了？"
+    keywords:
+      - 照顧者
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "她回家了。"
+      - "去買飯。"
+      - "去上廁所。"
+      - "我不知道。"
+      - "去外面散步晃一晃。"
+
+  - question: "我們下來練習走路好嗎？"
+    keywords:
+      - 復健
+      - 肢體
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "好。"
+      - "我可以再休息一下嗎？等等練習。"
+      - "今天不舒服，可以休息嗎？"
+      - "手腳會麻"
+      - "手腳沒有力氣"
+
+  - question: "今天到哪裡去運動。"
+    keywords:
+      - 活動
+      - 地點
+    speakers:
+      - 護理師
+    patient_responses:
+      - "只有到走廊而已。"
+      - "有下去大廳看看。"
+      - "有到外面的湖邊。"
+      - "沒有下來活動。"
+      - "有離開病房（非以上地點）。"
+
+  - question: "昨天晚上睡得好嗎？"
+    keywords:
+      - 睡眠
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "很好。"
+      - "整晚都沒有睡。"
+      - "斷斷續續的睡，會一直醒來。"
+      - "很難入睡。"
+      - "還可以。"
+
+  - question: "睡不好是因為哪裡痛嗎?"
+    keywords:
+      - 睡眠
+      - 原因
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "管子不舒服"
+      - "傷口痛"
+      - "全身痠痛"
+      - "太吵"
+
+  - question: "有沒有覺得自己情況有進步"
+    keywords:
+      - 改善
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "有"
+      - "沒有"
+      - "差不多"
+      - "我不知道。"
+
+  - question: "你覺得哪部分有比較進步或改善?"
+    keywords:
+      - 改善
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "比較有力氣"
+      - "比較不痛"
+      - "比較不會麻"
+      - "可以吃"
+      - "可以講話"
+      - "可以自己走路"
+
+  - question: "你看起來心情不太好，怎麼了嗎？"
+    keywords:
+      - 心理
+      - 情緒
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "身體不舒服"
+      - "有點累"
+      - "心情不好"
+      - "沒有錢"
+      - "我不想回答。"
+
+  - question: "今天吃的東西及尿尿都有紀錄了嗎？"
+    keywords:
+      - 治療
+      - 輸出入量
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "還沒，等我寫一下"
+      - "我不知道，要問我家人/看護/外傭"
+      - "有，都紀錄好了"
+      - "沒有，我忘記了"
+
+  - question: "你需要訂餐嗎？"
+    keywords:
+      - 飲食
+      - 餐點
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "要，我三餐都要"
+      - "要，我只要早餐及午餐"
+      - "要，我只要早餐及晚餐"
+      - "要，我只要午餐跟晚餐"
+      - "不用，我自己準備"
+
+  - question: "你有什麼禁忌食物或對什麼過敏嗎？"
+    keywords:
+      - 飲食
+      - 過敏
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "有，對海鮮過敏"
+      - "有，我不吃牛肉"
+      - "有，我對__過敏"
+      - "我吃全素"
+      - "我吃蛋奶素"
+      - "早餐素食"
+
+  - question: "餐點質地需要調整嗎？"
+    keywords:
+      - 飲食
+      - 餐點
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "不用，一般質地即可"
+      - "需要，改成軟質餐"
+      - "需要，改成細碎餐"
+      - "需要，改成泥狀餐"
+      - "需要，改成管灌配方"
+
+  - question: "床的高度可以嗎？"
+    keywords:
+      - 活動
+      - 姿勢
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "可以。"
+      - "再高一點。"
+      - "低一點。"
+      - "我可以自己調。"

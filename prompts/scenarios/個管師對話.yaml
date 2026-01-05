@@ -1,0 +1,24 @@
+scenario: 個管師對話
+
+questions:
+  - question: "口腔痛有好點嗎？"
+    keywords:
+      - 疼痛
+      - 程度
+    speakers:
+      - 個案管理師
+    patient_responses:
+      - "改藥後比較好了"
+      - "還可以"
+      - "我覺得還是很痛"
+
+  - question: "對於後續治療有了解嗎？"
+    keywords:
+      - 治療
+      - 方案
+    speakers:
+      - 個案管理師
+    patient_responses:
+      - "醫生和護士有說"
+      - "不太懂後續要做什麼"
+      - "醫師還沒有說"

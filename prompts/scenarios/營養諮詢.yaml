@@ -1,0 +1,157 @@
+scenario: 營養諮詢
+
+questions:
+  - question: "目前的飲食配方吃了有什麼不舒服嗎?"
+    keywords:
+      - 飲食
+      - 不適
+    speakers:
+      - 營養師
+    patient_responses:
+      - "沒有"
+      - "吃不夠，會肚子餓"
+      - "吃不下，有其他建議的配方嗎"
+      - "會拉肚子"
+
+  - question: "你現在有在補充什麼營養品嗎？"
+    keywords:
+      - 飲食
+      - 餐點
+    speakers:
+      - 營養師
+    patient_responses:
+      - "我有在吃腫瘤配方奶"
+      - "我有買麩醯胺酸"
+      - "我不知道要怎麼選擇營養品"
+      - "我沒有在額外喝營養品"
+
+  - question: "現在的飲食質地需要調整嗎？"
+    keywords:
+      - 飲食
+      - 餐點
+    speakers:
+      - 營養師
+    patient_responses:
+      - "要再軟一點會比較好咬"
+      - "可以"
+      - "我完全沒辦法咬，可以改用喝的嗎？"
+
+  - question: "最近體重有變化嗎?"
+    keywords:
+      - 營養
+      - 體重
+    speakers:
+      - 護理師
+    patient_responses:
+      - "有變瘦"
+      - "都差不多"
+      - "變瘦很多，大概10公斤"
+      - "有變胖一點"
+
+  - question: "現在一天吃幾餐"
+    keywords:
+      - 營養
+      - 食慾
+    speakers:
+      - 護理師
+      - 營養師
+    patient_responses:
+      - "一天只有兩餐"
+      - "正常三餐"
+      - "跟以前差不多"
+      - "嘴巴太痛了，我都是想到才吃"
+
+  - question: "最近食慾如何?"
+    keywords:
+      - 營養
+      - 食慾
+    speakers:
+      - 護理師
+    patient_responses:
+      - "都差不多"
+      - "有吃比較少"
+      - "嘴巴很痛，吃不下"
+      - "我知道之後要治療，所以有逼自己吃多一點"
+
+  - question: "想要試試看營養品嗎?"
+    keywords:
+      - 飲食
+      - 餐點
+    speakers:
+      - 營養師
+    patient_responses:
+      - "我喝牛奶會拉肚子"
+      - "我不喜歡那個味道"
+      - "我有乳糖不耐症"
+      - "我可以試試看"
+
+  - question: "如果還是吃不下繼續掉體重，有考慮放餵食管嗎?"
+    keywords:
+      - 鼻胃管
+      - 意願
+    speakers:
+      - 護理師
+    patient_responses:
+      - "我不要"
+      - "我會再嘗試吃東西看看"
+      - "我吃不下，也只能這樣"
+
+  - question: "院內餐吃得完嗎?"
+    keywords:
+      - 營養
+      - 食慾
+    speakers:
+      - 護理師
+    patient_responses:
+      - "我可以全部吃完"
+      - "肉太大塊了我咬不動"
+      - "我只有把菜吃完，飯沒有吃完"
+      - "我只能吃一半"
+
+  - question: "灌食狀況還好嗎?"
+    keywords:
+      - 鼻胃管
+      - 灌食
+    speakers:
+      - 營養師
+    patient_responses:
+      - "我都有灌完"
+      - "我拉肚子"
+      - "好幾天沒大便了"
+      - "肚子覺得脹脹的"
+
+  - question: "灌食反抽量大概有多少?"
+    keywords:
+      - 鼻胃管
+      - 灌食
+    speakers:
+      - 營養師
+    patient_responses:
+      - "每次反抽都有很多東西"
+      - "抽起來都是空氣"
+      - "每次灌之前反抽還有大概50cc"
+
+  - question: "吞嚥咀嚼會痛嗎?"
+    keywords:
+      - 疼痛
+      - 程度
+    speakers:
+      - 營養師
+      - 護理師
+    patient_responses:
+      - "還好"
+      - "會，所以我都吃比較軟的東西"
+      - "我用正常的那邊咬就好"
+      - "很痛所以都吃不下"
+
+  - question: "在家有沒有準備灌食的配方?"
+    keywords:
+      - 飲食
+      - 餐點
+    speakers:
+      - 營養師
+    patient_responses:
+      - "親戚朋友有送很多"
+      - "我不知道可以買哪一款"
+      - "我已經自己買好跟醫院相同的配方"
+      - "沒有，有推薦的嗎?"

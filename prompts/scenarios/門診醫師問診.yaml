@@ -1,0 +1,113 @@
+scenario: 門診醫師問診
+
+questions:
+  - question: "最近還好嗎？"
+    keywords:
+      - 心理
+    speakers:
+      - 醫師
+    patient_responses:
+      - "打化療很累、不舒服。"
+      - "還不錯。"
+      - "沒什麼特別的。"
+      - "說不上來的不舒服。"
+
+  - question: "心情還好嗎？"
+    keywords:
+      - 心理
+      - 情緒
+    speakers:
+      - 醫師
+    patient_responses:
+      - "有點鬱卒。"
+      - "很好！"
+      - "還可以。"
+      - "很煩躁。"
+
+  - question: "有沒有需要什麼藥？"
+    keywords:
+      - 藥物
+      - 需求
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "藥膏。"
+      - "止痛藥。"
+      - "安眠藥。"
+
+  - question: "有沒有不舒服？"
+    keywords:
+      - 不適
+    speakers:
+      - 醫師
+    patient_responses:
+      - "沒有。"
+      - "會痛。"
+      - "緊繃。"
+
+  - question: "化療做完了嗎？"
+    keywords:
+      - 化放療
+    speakers:
+      - 醫師
+    patient_responses:
+      - "還在打。"
+      - "快結束了。"
+      - "療程都打完了。"
+
+  - question: "放療做完了嗎？"
+    keywords:
+      - 化放療
+    speakers:
+      - 醫師
+    patient_responses:
+      - "還在做。"
+      - "快結束了。"
+      - "療程都打完了。"
+
+  - question: "目前治療到現在，你身體狀況還好嗎？"
+    keywords:
+      - 不適
+    speakers:
+      - 醫師
+    patient_responses:
+      - "還好，沒什麼不舒服"
+      - "會比較累，休息一下可以緩解"
+      - "精神很差，睡不好，一直想吐"
+      - "精神很差，睡不好，全身很痛"
+
+  - question: "胃造口肉芽狀況還好嗎？"
+    keywords:
+      - 胃造口
+    speakers:
+      - 醫師
+    patient_responses:
+      - "清理很容易破皮"
+      - "傷口一直流血"
+      - "沒有太大問題"
+
+  - question: "傷口的藥膏跟先前開一樣數量的嗎?"
+    keywords:
+      - 藥物
+      - 需求
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "一樣就好"
+      - "需要多一些"
+      - "可以少一條"
+      - "先不用開，家裡還有"
+
+  - question: "藥物部分一樣維持原狀可以嗎?"
+    keywords:
+      - 藥物
+      - 需求
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "可以"
+      - "我備用的安眠藥要多一些"
+      - "備用的藥還有，不用開這麼多"

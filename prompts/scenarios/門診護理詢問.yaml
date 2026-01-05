@@ -1,0 +1,63 @@
+scenario: 門診護理詢問
+
+questions:
+  - question: "最近有發燒、感冒的症狀嗎？"
+    keywords:
+      - 不適
+      - 體溫
+    speakers:
+      - 護理師
+    patient_responses:
+      - "沒有。"
+      - "有發燒。"
+      - "流鼻水。"
+      - "喉嚨痛。"
+
+  - question: "還有在抽菸嗎？"
+    keywords:
+      - 不良習慣
+      - 抽菸
+    speakers:
+      - 護理師
+    patient_responses:
+      - "都沒有。"
+      - "偶爾。"
+      - "有減少。"
+      - "還是有抽"
+      - "戒了"
+
+  - question: "還有在吃檳榔嗎？"
+    keywords:
+      - 不良習慣
+      - 檳榔
+    speakers:
+      - 護理師
+    patient_responses:
+      - "都沒有。"
+      - "偶爾。"
+      - "有減少。"
+      - "還是有吃"
+      - "戒了"
+
+  - question: "還有再喝酒嗎?"
+    keywords:
+      - 不良習慣
+      - 飲酒
+    speakers:
+      - 護理師
+    patient_responses:
+      - "沒有。"
+      - "偶爾。"
+      - "有減少。"
+      - "還是有喝"
+      - "戒了"
+
+  - question: "下一次回診的時間有預約了嗎？"
+    keywords:
+      - 門診
+    speakers:
+      - 護理師
+    patient_responses:
+      - "還沒有，你能幫我預約嗎？"
+      - "不知道，可能要問我家人/看護/外傭"
+      - "有，已經預約好了"

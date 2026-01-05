@@ -1,0 +1,85 @@
+scenario: 照顧者互動
+
+questions:
+  - question: "你現在要下床走走嗎?"
+    keywords:
+      - 活動
+      - 意願
+    speakers:
+      - 護理師
+      - 照顧者
+    patient_responses:
+      - "我不想，很累"
+      - "好"
+      - "要走多久?"
+      - "我想再休息一下"
+
+  - question: "你現在會肚子餓嗎?"
+    keywords:
+      - 營養
+      - 食慾
+    speakers:
+      - 護理師
+      - 照顧者
+    patient_responses:
+      - "會"
+      - "不會，很脹"
+      - "沒食慾"
+      - "有一點餓"
+
+  - question: "你現在嘴巴、脖子這邊會很緊嗎?"
+    keywords:
+      - 口腔
+      - 不適
+    speakers:
+      - 照顧者
+    patient_responses:
+      - "還是很緊"
+      - "有比之前好一點"
+      - "感覺沒變化"
+
+  - question: "清嘴巴的力道可以嗎?"
+    keywords:
+      - 口腔
+      - 清潔
+    speakers:
+      - 照顧者
+    patient_responses:
+      - "太大力"
+      - "還可以"
+      - "沒感覺"
+
+  - question: "想吃甚麼"
+    keywords:
+      - 飲食
+      - 意願
+    speakers:
+      - 照顧者
+    patient_responses:
+      - "飯"
+      - "麵"
+      - "肉"
+
+  - question: "想喝甚麼"
+    keywords:
+      - 飲食
+      - 意願
+    speakers:
+      - 照顧者
+    patient_responses:
+      - "水"
+      - "果汁"
+      - "飲料"
+      - "茶"
+
+  - question: "哪裡不舒服?"
+    keywords:
+      - 不適
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "痛死了"
+      - "好痠"
+      - "好麻"
+      - "全身都不對勁"

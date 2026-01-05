@@ -1,0 +1,211 @@
+scenario: 醫師查房
+
+questions:
+  - question: "有沒有哪裡不舒服？"
+    keywords:
+      - 不適
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "都很好。"
+      - "吸不到氣。"
+      - "痠痛。"
+      - "很疲倦。"
+      - "肚子餓。"
+      - "手麻"
+      - "嘴巴有點痛"
+
+  - question: "今天精神怎麼樣？"
+    keywords:
+      - 精神狀態
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "精神還不錯。"
+      - "還是有點累。"
+      - "跟昨天差不多。"
+      - "沒睡好。"
+
+  - question: "今天有沒有下床走路活動?"
+    keywords:
+      - 復健
+      - 肢體
+    speakers:
+      - 護理師
+    patient_responses:
+      - "沒有，有氣切不好看"
+      - "沒有，手麻腳麻"
+      - "沒有力氣"
+      - "有，今天有在外面走一下子"
+
+  - question: "傷口覺得還好嗎？"
+    keywords:
+      - 傷口
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "不錯，沒什麼大問題。"
+      - "感覺有點腫腫的。"
+      - "我覺得很痛。"
+      - "是不是有點發紅？"
+      - "味道很重、很臭。"
+      - "有比較不痛"
+
+  - question: "味道重的話，要再加強清潔，護理師有教你們了嗎?"
+    keywords:
+      - 口腔
+      - 衛生
+    speakers:
+      - 醫師
+    patient_responses:
+      - "我忘記了"
+      - "我不知道"
+      - "有教，還不會"
+      - "有喔我們學會了"
+      - "一天要清潔幾次?"
+
+  - question: "口服止痛藥你覺得有效嗎？"
+    keywords:
+      - 疼痛
+      - 藥物
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "還滿有效的。"
+      - "還可以，比較不痛。"
+      - "還是很痛。"
+      - "用打針的比較有效。"
+
+  - question: "很痛的時候護理師打的針劑止痛藥，你覺得有效嗎?"
+    keywords:
+      - 疼痛
+      - 藥物
+    speakers:
+      - 醫師
+    patient_responses:
+      - "不太夠，還是很痛"
+      - "打了有必較不痛"
+      - "我打的是嗎啡嗎? 會不會打太多成癮?"
+      - "一天可以打幾次針?"
+
+  - question: "對於治療方式，有想法了嗎？"
+    keywords:
+      - 治療
+      - 意願
+    speakers:
+      - 醫師
+    patient_responses:
+      - "我決定要手術"
+      - "我要化療"
+      - "我要化療和放療"
+      - "我只想放療"
+      - "我不想做治療了。"
+      - "還沒想法"
+      - "我還在考慮"
+
+  - question: "怎麼不想做治療了，可以說說你在擔心什麼嗎?"
+    keywords:
+      - 治療
+      - 意願
+    speakers:
+      - 醫師
+    patient_responses:
+      - "太累了，很辛苦"
+      - "我不知道怎麼說"
+      - "我不想臉變醜"
+      - "化療電療很不舒服"
+      - "我想要安寧治療"
+
+  - question: "感染控制後我們再化療，有沒有什麼特別要跟我說的?"
+    keywords:
+      - 治療
+    speakers:
+      - 醫師
+    patient_responses:
+      - "醫師幫我安排就好"
+      - "抗生素要打多久?"
+      - "甚麼時候可以打藥?"
+      - "有哪些感染症狀我要注意的?"
+
+  - question: "那針對治療部分你還有甚麼想知道的?"
+    keywords:
+      - 治療
+      - 方案
+    speakers:
+      - 醫師
+    patient_responses:
+      - "沒有，就照醫生您安排的就好"
+      - "如果不開刀可以嗎?"
+      - "再來會有哪些檢查要做?"
+      - "腫瘤有轉移嗎?"
+      - "鼻胃管可不可以拿掉?"
+      - "什麼時候可以出院?"
+
+  - question: "你知道為什麼現在必須要裝鼻胃管嗎?"
+    keywords:
+      - 治療
+      - 管路
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "我不知道"
+      - "因為嘴巴有傷口"
+      - "因為吃東西可能會嗆到"
+      - "嘴巴太痛，沒辦法正常吃飯"
+      - "因為吃不下，營養不夠"
+
+  - question: "氣切部分有遇到甚麼狀況嗎?"
+    keywords:
+      - 治療
+      - 管路
+    speakers:
+      - 護理師
+    patient_responses:
+      - "不敢咳嗽"
+      - "甚麼時候可以拔掉?"
+      - "抽痰很不舒服"
+      - "要怎麼講話?"
+      - "一直想咳嗽"
+
+  - question: "食慾怎麼樣？"
+    keywords:
+      - 飲食
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "還可以。"
+      - "會餓。"
+      - "沒食慾。"
+      - "吃東西吞不下去"
+
+  - question: "從嘴巴吃都可以嗎?"
+    keywords:
+      - 飲食
+      - 吞嚥
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "我只能吃流質的。"
+      - "我都吃細碎一點"
+      - "現在比較可以吞"
+      - "還是沒辦法吞"
+
+  - question: "有去做吞嚥的復健了嗎?"
+    keywords:
+      - 復健
+      - 吞嚥
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "有，今天有去"
+      - "昨天去過"
+      - "沒有聽說有安排"
+      - "什麼時候開始去?"

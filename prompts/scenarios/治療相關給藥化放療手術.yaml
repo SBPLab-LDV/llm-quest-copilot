@@ -1,0 +1,229 @@
+scenario: 治療相關(給藥化放療手術)
+
+questions:
+  - question: "你自己帶來的藥放在哪裡？"
+    keywords:
+      - 藥物
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "床頭櫃。"
+      - "櫃子裡。"
+      - "我沒有藥了。"
+      - "我不知道。"
+      - "我已經拿給護理師了。"
+
+  - question: "你自己的藥吃了嗎？"
+    keywords:
+      - 藥物
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "還沒有，我等等自己吃。"
+      - "還沒有，可以請你幫我拿嗎？"
+      - "吃完了。"
+      - "我不想吃那顆藥了。"
+
+  - question: "怎麼不想吃那顆藥?吃了有不舒服的狀況嗎?"
+    keywords:
+      - 藥物
+      - 不適
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "會一直拉肚子"
+      - "會便祕"
+      - "吃了會癢"
+      - "吃完就不舒服"
+      - "就不想吃"
+
+  - question: "你有對什麼藥物過敏嗎？"
+    keywords:
+      - 藥物
+      - 過敏
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "有，上次住院有發生，可以幫我查查看嗎？"
+      - "有，但我不確定是什麼藥物，可以幫我問問我家人/外傭嗎？"
+      - "沒有藥物過敏"
+
+  - question: "後續要做放療，經過說明後，你有比較了解如何進行自我照顧嗎？"
+    keywords:
+      - 化放療
+      - 照護
+    speakers:
+      - 醫師
+    patient_responses:
+      - "你的說明很完整，我有了解、會配合"
+      - "內容太多記不了，你們再提醒我"
+      - "跟家屬/看護說"
+
+  - question: "後續要做化療，經過說明後，你有比較了解如何進行自我照顧嗎？"
+    keywords:
+      - 化放療
+      - 照護
+    speakers:
+      - 醫師
+    patient_responses:
+      - "你的說明很完整，我有了解、會配合"
+      - "內容太多記不了，你們再提醒我"
+      - "跟家屬/看護說"
+
+  - question: "常見口腔黏膜炎、放射線皮膚炎，你能回覆照顧方式嗎？"
+    keywords:
+      - 化放療
+      - 照護
+    speakers:
+      - 醫師
+    patient_responses:
+      - "可以"
+      - "沒辦法"
+      - "可以在跟我說一次嗎?"
+
+  - question: "這次做化療有遇到不舒服的症狀嗎?"
+    keywords:
+      - 化放療
+      - 不適
+    speakers:
+      - 醫師
+    patient_responses:
+      - "一直在拉肚子"
+      - "噁心想吐"
+      - "嘴巴破洞好痛"
+
+  - question: "對於化療有什麼疑問嗎?"
+    keywords:
+      - 化放療
+      - 疑問
+    speakers:
+      - 醫師
+    patient_responses:
+      - "要做多久?"
+      - "會有什麼副作用?"
+      - "要怎麼補充營養?"
+      - "沒有，謝謝醫師安排"
+
+  - question: "對於放療有什麼疑問嗎?"
+    keywords:
+      - 化放療
+      - 疑問
+    speakers:
+      - 醫師
+    patient_responses:
+      - "化療跟放療都要做嗎?"
+      - "有開刀切除還需要放療嗎?"
+      - "做放療會有什麼問題出現嗎?"
+      - "沒有，謝謝醫師安排"
+
+  - question: "化療後進食如何?有沒有噁心嘔吐?"
+    keywords:
+      - 化放療
+      - 不適
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "我吃不下會喝安素。"
+      - "回家一開始會噁心，過幾天就沒有了。"
+      - "一直都食慾不好"
+
+  - question: "你有清楚人工血管要注意甚麼地方嗎?"
+    keywords:
+      - 化放療
+      - 照護
+    speakers:
+      - 醫師
+    patient_responses:
+      - "我知道，不能搬重物、手的動作太大"
+      - "我多久要回來沖洗人工血管?"
+      - "我不清楚，可以再跟我說一次嗎?"
+      - "大概知道一些"
+
+  - question: "化學治療後，有覺得噁心想吐嗎？"
+    keywords:
+      - 化放療
+      - 不適
+    speakers:
+      - 醫師
+    patient_responses:
+      - "有吐，還有點噁心感，可以開一些止吐的藥嗎？"
+      - "有點噁心感，但還可以忍受"
+      - "沒有吐，但有噁心感"
+      - "感覺還好"
+
+  - question: "化學治療後，精神狀況還好嗎？"
+    keywords:
+      - 化放療
+      - 不適
+    speakers:
+      - 醫師
+    patient_responses:
+      - "覺得很累，完全提不起勁"
+      - "有點累，睡一覺會好一點"
+      - "精神狀況跟之前差不多"
+
+  - question: "您在意的問題是開刀後會產生疤痕的問題嗎？"
+    keywords:
+      - 手術
+      - 疑問
+    speakers:
+      - 醫師
+    patient_responses:
+      - "語言的問題"
+      - "放鼻胃管跟氣切很不舒服"
+      - "臉不好看"
+
+  - question: "明天要開刀有什麼不清楚的地方嗎?"
+    keywords:
+      - 手術
+      - 疑問
+    speakers:
+      - 醫師
+    patient_responses:
+      - "明天是幾點要開刀?"
+      - "我要禁食嗎?"
+      - "手術之後身上會有什麼管子嗎?"
+      - "明天手術會怎麼進行?"
+      - "手術之後還有哪些治療?"
+
+  - question: "這次開刀要切除的部位有不清楚的地方嗎?"
+    keywords:
+      - 手術
+      - 疑問
+    speakers:
+      - 醫師
+    patient_responses:
+      - "切除的範圍到哪邊?"
+      - "淋巴結部份，兩邊都會切除嗎?"
+      - "傷口會很大嗎?"
+
+  - question: "你有學會深呼吸咳嗽了嗎?"
+    keywords:
+      - 痰液
+      - 咳嗽
+    speakers:
+      - 醫師
+      - 護理師
+    patient_responses:
+      - "我知道，護理師有教我"
+      - "還沒有很會"
+      - "那是甚麼?"
+      - "我還不會"
+
+  - question: "手術當天會有誰陪你呢?"
+    keywords:
+      - 手術
+      - 照顧者
+    speakers:
+      - 醫師
+    patient_responses:
+      - "我的太太/先生"
+      - "我的兒女"
+      - "我的兄弟姊妹"
+      - "我不知道"
+      - "沒有人"
