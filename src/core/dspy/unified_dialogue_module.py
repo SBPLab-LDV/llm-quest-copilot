@@ -300,15 +300,22 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             fewshot_section = ""
             if self.scenario_manager:
                 try:
-                    examples = self.scenario_manager.get_examples(
-                        user_input=user_input,
-                        previous_context=self._last_context_label,
-                        previous_speaker=self._last_speaker_role,
-                        max_examples=3
-                    )
+                    # 第一輪對話：使用 bootstrap examples 確保多角色覆蓋
+                    if self._last_context_label is None and self._last_speaker_role is None:
+                        examples = self.scenario_manager.get_bootstrap_examples()
+                        logger.debug(f"📚 第一輪：載入 {len(examples)} 個 bootstrap 範例（多角色覆蓋）")
+                    else:
+                        # 後續輪次：使用上輪推理結果載入精準範例
+                        examples = self.scenario_manager.get_examples(
+                            user_input=user_input,
+                            previous_context=self._last_context_label,
+                            previous_speaker=self._last_speaker_role,
+                            max_examples=3
+                        )
+                        logger.debug(f"📚 後續輪：載入 {len(examples)} 個精準範例")
+
                     if examples:
                         fewshot_section = self.scenario_manager.format_examples_for_prompt(examples)
-                        logger.debug(f"📚 載入 {len(examples)} 個 few-shot 範例")
                 except Exception as e:
                     logger.debug(f"Few-shot 載入失敗: {e}")
 

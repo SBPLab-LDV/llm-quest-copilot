@@ -42,6 +42,40 @@ class ScenarioManager:
     # 反向對應
     CONTEXT_MAPPING_REVERSE = {v: k for k, v in CONTEXT_MAPPING.items()}
 
+    # 第一輪對話用的預設範例（確保多角色覆蓋，解決雞生蛋問題）
+    BOOTSTRAP_EXAMPLES = [
+        {
+            "question": "嘴巴現在張得怎麼樣？有沒有比較打開？",
+            "speakers": ["物理治療師"],
+            "keywords": ["張口", "張嘴", "嘴巴"],
+            "patient_responses": ["比較打開了", "還是有點緊", "比昨天好一點"]
+        },
+        {
+            "question": "你現在有在補充什麼營養品嗎？",
+            "speakers": ["營養師"],
+            "keywords": ["營養品", "配方奶", "補充"],
+            "patient_responses": ["我有在吃配方奶", "沒有特別補充", "有吃一些維他命"]
+        },
+        {
+            "question": "你今天感覺怎麼樣？有沒有哪裡不舒服？",
+            "speakers": ["護理師"],
+            "keywords": ["感覺", "不舒服"],
+            "patient_responses": ["還好", "有點累", "比昨天好"]
+        },
+        {
+            "question": "傷口恢復得怎麼樣？",
+            "speakers": ["醫師"],
+            "keywords": ["傷口", "恢復", "檢查報告"],
+            "patient_responses": ["還好，沒什麼感覺", "有點痛", "看起來在癒合"]
+        },
+        {
+            "question": "爸，你今天有沒有比較好一點？",
+            "speakers": ["照顧者"],
+            "keywords": ["爸", "媽", "阿公", "阿嬤"],
+            "patient_responses": ["有啦，今天好多了", "差不多", "比較有精神了"]
+        },
+    ]
+
     def __init__(self, scenarios_dir: str = None):
         """初始化 ScenarioManager
 
@@ -284,6 +318,17 @@ class ScenarioManager:
             中文情境名稱，如果找不到則回傳原 ID
         """
         return self.CONTEXT_MAPPING_REVERSE.get(context_id, context_id)
+
+    def get_bootstrap_examples(self) -> List[Dict[str, Any]]:
+        """取得第一輪對話用的預設範例（多角色覆蓋）
+
+        用於解決第一輪對話的「雞生蛋」問題：
+        沒有 previous_context → 無法載入對應 few-shot → LLM 推理不準
+
+        Returns:
+            包含物理治療師、營養師、護理師、醫師、照顧者範例的列表
+        """
+        return self.BOOTSTRAP_EXAMPLES.copy()
 
 
 # 單例模式
