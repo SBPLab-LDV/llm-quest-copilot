@@ -10,13 +10,13 @@ from typing import List, Dict, Any, Optional
 
 class PatientResponseSignature(dspy.Signature):
     """生成病患回應的簽名
-    
-    這是核心的病患回應生成簽名，用於根據護理人員的輸入
+
+    這是核心的病患回應生成簽名，用於根據對話方的輸入
     生成多個可能的病患回應選項。
     """
-    
-    # 輸入欄位 - 護理人員和對話相關信息
-    user_input = dspy.InputField(desc="護理人員的輸入或問題")
+
+    # 輸入欄位 - 對話方和對話相關信息
+    user_input = dspy.InputField(desc="對話方的輸入或問題")
     character_name = dspy.InputField(desc="病患角色的名稱")
     character_persona = dspy.InputField(desc="病患的個性描述")
     character_backstory = dspy.InputField(desc="病患的背景故事")
@@ -37,7 +37,7 @@ class ContextClassificationSignature(dspy.Signature):
     """
     
     # 輸入欄位
-    user_input = dspy.InputField(desc="護理人員的輸入")
+    user_input = dspy.InputField(desc="對話方的輸入")
     available_contexts = dspy.InputField(desc="可用的對話情境列表，YAML格式")
     conversation_history = dspy.InputField(desc="對話歷史")
     
@@ -53,7 +53,7 @@ class ResponseEvaluationSignature(dspy.Signature):
     """
     
     # 輸入欄位
-    user_input = dspy.InputField(desc="護理人員的原始輸入")
+    user_input = dspy.InputField(desc="對話方的原始輸入")
     character_info = dspy.InputField(desc="病患角色信息")
     generated_responses = dspy.InputField(desc="生成的回應選項列表")
     dialogue_context = dspy.InputField(desc="對話情境")
@@ -72,7 +72,7 @@ class StateTransitionSignature(dspy.Signature):
     
     # 輸入欄位
     current_state = dspy.InputField(desc="當前對話狀態")
-    user_input = dspy.InputField(desc="護理人員的輸入")
+    user_input = dspy.InputField(desc="對話方的輸入")
     character_condition = dspy.InputField(desc="病患當前的身體狀況")
     conversation_context = dspy.InputField(desc="對話上下文")
     
@@ -88,7 +88,7 @@ class ExampleRetrievalSignature(dspy.Signature):
     """
     
     # 輸入欄位
-    query = dspy.InputField(desc="查詢內容，通常是護理人員的輸入")
+    query = dspy.InputField(desc="查詢內容，通常是對話方的輸入")
     context = dspy.InputField(desc="對話情境")
     available_examples = dspy.InputField(desc="可用的範例列表")
     max_examples = dspy.InputField(desc="最大返回範例數量")

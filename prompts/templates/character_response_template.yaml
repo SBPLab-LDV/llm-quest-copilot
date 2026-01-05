@@ -56,7 +56,7 @@ character_response: |
   歷史對話：
   {conversation_history}
   
-  護理人員說：{user_input}
+  對話方說：{user_input}
   
   請以病患的身份回應。你必須：
   1. 仔細判斷當前對話的狀態，不要總是使用 NORMAL

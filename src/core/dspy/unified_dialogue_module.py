@@ -95,7 +95,7 @@ class UnifiedPatientResponseSignature(dspy.Signature):
     """統一的病患回應生成簽名（精簡提示 + 可優化規則欄位）。"""
 
     # 輸入欄位（核心語境）
-    user_input = dspy.InputField(desc="護理人員問題")
+    user_input = dspy.InputField(desc="對話方的問題")
     character_name = dspy.InputField(desc="病患姓名")
     character_persona = dspy.InputField(desc="病患性格")
     character_backstory = dspy.InputField(desc="病患背景")
@@ -263,7 +263,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         """統一的前向傳播 - 單次 API 調用完成所有處理
         
         Args:
-            user_input: 護理人員的輸入
+            user_input: 對話方的輸入
             character_name: 病患名稱
             character_persona: 病患個性
             character_backstory: 病患背景故事
