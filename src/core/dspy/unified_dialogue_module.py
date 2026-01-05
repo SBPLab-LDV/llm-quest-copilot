@@ -18,6 +18,7 @@ from dspy.adapters.utils import format_field_value, translate_field_type
 from dspy.dsp.utils.settings import settings
 
 from .dialogue_module import DSPyDialogueModule
+from ..scenario_manager import get_scenario_manager
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +236,14 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         self._last_speaker_role: Optional[str] = None  # 追蹤推理出的提問者角色
         self._fewshot_used = False
 
+        # 初始化 ScenarioManager 用於動態載入 few-shot 範例
+        try:
+            self.scenario_manager = get_scenario_manager()
+            logger.info(f"ScenarioManager 已載入 {len(self.scenario_manager.scenarios)} 個情境")
+        except Exception as e:
+            logger.warning(f"ScenarioManager 初始化失敗: {e}")
+            self.scenario_manager = None
+
         # 簡化：一致性檢查停用
         self.enable_consistency_check = False
         
@@ -280,8 +289,26 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             # 獲取精簡後的可用情境清單
             available_contexts = self._build_available_contexts()
 
-            # 簡化：不插入 few-shot 範例，降低提示長度與延遲
-            
+            # 動態載入 few-shot 範例（基於上輪推理結果 + 關鍵字匹配）
+            fewshot_section = ""
+            if self.scenario_manager:
+                try:
+                    examples = self.scenario_manager.get_examples(
+                        user_input=user_input,
+                        previous_context=self._last_context_label,
+                        previous_speaker=self._last_speaker_role,
+                        max_examples=3
+                    )
+                    if examples:
+                        fewshot_section = self.scenario_manager.format_examples_for_prompt(examples)
+                        logger.debug(f"📚 載入 {len(examples)} 個 few-shot 範例")
+                except Exception as e:
+                    logger.debug(f"Few-shot 載入失敗: {e}")
+
+            # 將 few-shot 範例注入對話歷史
+            if fewshot_section:
+                formatted_history = f"{fewshot_section}\n\n{formatted_history}"
+
             current_call = self.unified_stats['total_unified_calls'] + 1
             logger.info(f"🚀 Unified DSPy call #{current_call} - {character_name} processing {len(conversation_history)} history entries")
             
