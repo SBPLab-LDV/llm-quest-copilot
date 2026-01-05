@@ -130,6 +130,8 @@ class DialogueResponse(BaseModel):
     inferred_speaker_role: Optional[str] = None  # 推理出的提問者角色（醫師/護理師/營養師/物理治療師/個案管理師/照顧者）
     speech_recognition_options: Optional[List[str]] = None  # 新增: 語音識別可能的選項
     original_transcription: Optional[str] = None  # 新增: 原始語音轉錄文本
+    raw_transcript: Optional[str] = None  # Self-annotation: 原始轉錄片段
+    keyword_completion: Optional[List[Dict[str, Any]]] = None  # Self-annotation: 關鍵詞補全
     implementation_version: Optional[str] = None  # Phase 5: 實現版本標記
     performance_metrics: Optional[Dict[str, Any]] = None  # Phase 5: 性能指標
     processing_info: Optional[Dict[str, Any]] = None  # Unified/consistency摘要（可選）
@@ -535,10 +537,13 @@ async def speech_to_text(
             try:
                 result = json.loads(transcription_json)
 
+                # 提取 self-annotation 欄位
+                raw_transcript = result.get("raw_transcript", "")
+                keyword_completion = result.get("keyword_completion", [])
                 original = result.get("original", "")
                 options = result.get("options", [])
 
-                logger.info(f"音頻識別成功: 原始='{original}', 選項數={len(options)}")
+                logger.info(f"音頻識別成功: raw_transcript='{raw_transcript}', 原始='{original}', 選項數={len(options)}")
 
                 if not original or original.startswith("無法識別") or original.startswith("音頻識別過程中發生錯誤"):
                     logger.warning(f"音頻識別失敗或沒有識別出有效內容: {original}")
@@ -579,6 +584,8 @@ async def speech_to_text(
                         )
 
                 return {
+                    "raw_transcript": raw_transcript,
+                    "keyword_completion": keyword_completion,
                     "original": original,
                     "options": options,
                     "trace_id": trace_id,
@@ -589,6 +596,8 @@ async def speech_to_text(
             except json.JSONDecodeError:
                 logger.error(f"無法解析識別結果 JSON: {transcription_json}")
                 return {
+                    "raw_transcript": "",
+                    "keyword_completion": [],
                     "original": transcription_json,
                     "options": [transcription_json],
                     "trace_id": trace_id,
@@ -597,6 +606,8 @@ async def speech_to_text(
         except Exception as e:
             logger.error(f"使用 Gemini 進行音頻識別時出錯: {e}", exc_info=True)
             return {
+                "raw_transcript": "",
+                "keyword_completion": [],
                 "original": "識別失敗",
                 "options": ["您好，這是一條測試訊息。目前遇到了語音識別問題，請稍後再試或改用文字輸入。"],
                 "trace_id": trace_id,
@@ -1320,15 +1331,18 @@ async def process_audio_dialogue(
             }
             logger.debug(f"使用預設字典: {text_dict}")
     
-    # 提取原始文本和選項
+    # 提取原始文本和選項（包含 self-annotation 欄位）
+    raw_transcript = text_dict.get("raw_transcript", "")
+    keyword_completion = text_dict.get("keyword_completion", [])
     original_text = text_dict.get("original", "")
     options_list = text_dict.get("options", [])
-    
+
     # 確保選項是有效的列表
     if not isinstance(options_list, list) or not options_list:
         logger.warning("識別選項無效或為空，使用原始文本作為選項")
         options_list = [original_text] if original_text else ["無法識別您的語音"]
-        
+
+    logger.info(f"原始轉錄片段: '{raw_transcript}'")
     logger.info(f"原始識別文本: '{original_text}'")
     logger.info(f"識別選項 ({len(options_list)}): {options_list}")
     
@@ -1377,16 +1391,20 @@ async def process_audio_dialogue(
         session_id=session_id,
         speech_recognition_options=options_list,
         original_transcription=original_text or None,
+        raw_transcript=raw_transcript or None,
+        keyword_completion=keyword_completion or None,
         implementation_version=implementation_version,
         performance_metrics=audio_metrics,
         logs=session.get("logs") if session else None,
     )
-    
-    # 保存語音識別選項到交互日誌
+
+    # 保存語音識別選項到交互日誌（包含 self-annotation 欄位）
     dialogue_manager.log_interaction(
         user_input="[語音輸入]",
         response_options=options_list,
-        selected_response=None
+        selected_response=None,
+        raw_transcript=raw_transcript,
+        keyword_completion=keyword_completion
     )
     
     # 排程清理舊會話

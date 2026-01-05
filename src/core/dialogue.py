@@ -80,20 +80,31 @@ class DialogueManager:
         
         return text
 
-    def log_interaction(self, user_input: str, response_options: list, selected_response: Optional[str] = None):
+    def log_interaction(
+        self,
+        user_input: str,
+        response_options: list,
+        selected_response: Optional[str] = None,
+        raw_transcript: Optional[str] = None,
+        keyword_completion: Optional[list] = None
+    ):
         """記錄使用者輸入、回應選項和選擇的回應。
 
         Args:
             user_input: 使用者的輸入文字。
             response_options: LLM 生成的回應選項列表。
             selected_response: 使用者選擇的回應，如果沒有選擇則為 None。
+            raw_transcript: Self-annotation 原始轉錄片段。
+            keyword_completion: Self-annotation 關鍵詞補全列表。
         """
         timestamp = datetime.datetime.now().isoformat()
         log_entry = {
             "timestamp": timestamp,
             "user_input": user_input,
             "response_options": response_options,
-            "selected_response": selected_response
+            "selected_response": selected_response,
+            "raw_transcript": raw_transcript,
+            "keyword_completion": keyword_completion
         }
         self.interaction_log.append(log_entry)
         print(f"互動已記錄：{log_entry}") # 可以選擇性地印出或儲存到檔案

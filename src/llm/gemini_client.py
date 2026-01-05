@@ -36,6 +36,9 @@ class GeminiClient:
         # Diagnostics
         self._last_audio_used_dspy: bool = False
         self._last_audio_signature: Optional[str] = None
+        # Self-annotation fields
+        self._last_audio_raw_transcript: Optional[str] = None
+        self._last_audio_keyword_completion: Optional[list] = None
         
     def _infer_mime_type(self, path: str) -> str:
         try:
@@ -310,14 +313,52 @@ class GeminiClient:
 
             try:
                 json_result = json.loads(cleaned_text)
-                if "original" not in json_result or "options" not in json_result:
-                    self.logger.warning(f"回應缺少必要字段: {json_result}")
-                    original = json_result.get('original', result_text)
-                    return json.dumps({
-                        "original": original,
-                        "options": [original]
-                    })
-                self._last_audio_clean = json.dumps(json_result)
+
+                # 驗證必要欄位（不降級，缺少則返回錯誤）
+                raw_transcript = json_result.get('raw_transcript')
+                keyword_completion = json_result.get('keyword_completion')
+                original = json_result.get('original')
+                options = json_result.get('options')
+
+                # 嚴格驗證：必須包含 raw_transcript
+                if raw_transcript is None:
+                    self.logger.error("Gemini 返回格式錯誤：缺少 raw_transcript")
+                    error_result = json.dumps({
+                        "error": "格式錯誤：缺少 raw_transcript",
+                        "raw_transcript": "",
+                        "keyword_completion": [],
+                        "original": "語音識別格式錯誤，請重試",
+                        "options": ["語音識別格式錯誤，請重試"]
+                    }, ensure_ascii=False)
+                    self._last_audio_clean = error_result
+                    return error_result
+
+                # 嚴格驗證：必須包含 keyword_completion
+                if keyword_completion is None or not isinstance(keyword_completion, list):
+                    self.logger.error("Gemini 返回格式錯誤：缺少或無效的 keyword_completion")
+                    error_result = json.dumps({
+                        "error": "格式錯誤：缺少 keyword_completion",
+                        "raw_transcript": raw_transcript or "",
+                        "keyword_completion": [],
+                        "original": "語音識別格式錯誤，請重試",
+                        "options": ["語音識別格式錯誤，請重試"]
+                    }, ensure_ascii=False)
+                    self._last_audio_clean = error_result
+                    return error_result
+
+                # 保存到診斷屬性
+                self._last_audio_raw_transcript = raw_transcript
+                self._last_audio_keyword_completion = keyword_completion
+
+                # 返回完整結構
+                result = {
+                    "raw_transcript": raw_transcript,
+                    "keyword_completion": keyword_completion,
+                    "original": original or "",
+                    "options": options or []
+                }
+                self._last_audio_clean = json.dumps(result, ensure_ascii=False)
+
                 if self.logging_cfg.get('llm_raw', False):
                     max_len = int(self.logging_cfg.get('max_chars', 8000))
                     prefix = ''
@@ -326,11 +367,16 @@ class GeminiClient:
                     self.logger.info(f"{prefix}LM OUT (audio/clean): {self._last_audio_clean[:max_len]}")
                 return self._last_audio_clean
             except json.JSONDecodeError:
-                self.logger.warning(f"回應不是 JSON 格式: {result_text}")
-                return json.dumps({
-                    "original": result_text,
-                    "options": [result_text]
-                })
+                self.logger.error(f"回應不是 JSON 格式: {result_text}")
+                error_result = json.dumps({
+                    "error": "JSON 解析錯誤",
+                    "raw_transcript": "",
+                    "keyword_completion": [],
+                    "original": "語音識別格式錯誤，請重試",
+                    "options": ["語音識別格式錯誤，請重試"]
+                }, ensure_ascii=False)
+                self._last_audio_clean = error_result
+                return error_result
 
         except Exception as e:
             self.logger.error(f"音頻識別失敗: {e}", exc_info=True)
@@ -366,3 +412,11 @@ class GeminiClient:
     @property
     def last_trace_id(self) -> Optional[str]:
         return self._last_trace_id
+
+    @property
+    def last_audio_raw_transcript(self) -> Optional[str]:
+        return self._last_audio_raw_transcript
+
+    @property
+    def last_audio_keyword_completion(self) -> Optional[list]:
+        return self._last_audio_keyword_completion

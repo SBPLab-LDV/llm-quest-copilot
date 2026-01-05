@@ -114,29 +114,54 @@ class AudioDisfluencyPostModule:
         import json
         cleaned = self._clean_fences(raw_transcription or '')
 
-        def _pack(original: str, options: list[str]):
+        def _pack_full(raw_transcript: str, keyword_completion: list, original: str, options: list[str]):
+            """打包完整的 self-annotation 格式"""
             safe_options = [str(x).strip() for x in (options or []) if str(x).strip()]
             if not safe_options and original:
                 safe_options = [original]
-            payload = {"original": str(original or '').strip(), "options": safe_options[:5]}
+            payload = {
+                "raw_transcript": raw_transcript,
+                "keyword_completion": keyword_completion,
+                "original": str(original or '').strip(),
+                "options": safe_options[:5]
+            }
+            return {"normalized_json": json.dumps(payload, ensure_ascii=False)}
+
+        def _pack_error(error_msg: str):
+            """打包錯誤格式"""
+            payload = {
+                "error": error_msg,
+                "raw_transcript": "",
+                "keyword_completion": [],
+                "original": "語音識別格式錯誤，請重試",
+                "options": ["語音識別格式錯誤，請重試"]
+            }
             return {"normalized_json": json.dumps(payload, ensure_ascii=False)}
 
         try:
             obj = json.loads(cleaned)
             if isinstance(obj, dict):
-                original = obj.get('original') or obj.get('text') or obj.get('transcript') or ''
-                options = obj.get('options')
+                raw_transcript = obj.get('raw_transcript')
+                keyword_completion = obj.get('keyword_completion')
+                original = obj.get('original', '')
+                options = obj.get('options', [])
+
+                # 嚴格驗證：不降級
+                if raw_transcript is None or keyword_completion is None:
+                    return _pack_error("格式錯誤：缺少必要欄位")
+
+                if not isinstance(keyword_completion, list):
+                    return _pack_error("格式錯誤：keyword_completion 必須是列表")
+
                 if not isinstance(options, list):
                     options = [original] if original else []
-                return _pack(original, options)
-            # If it's a list, take first as original
-            if isinstance(obj, list) and obj:
-                return _pack(str(obj[0]), list(obj))
+
+                return _pack_full(raw_transcript, keyword_completion, original, options)
         except Exception:
             pass
 
-        # Fallback: treat the whole string as original
-        return _pack(cleaned, [cleaned] if cleaned else [])
+        # 解析失敗：返回錯誤
+        return _pack_error("JSON 解析錯誤")
 
 
 _post_singleton: Optional[AudioDisfluencyPostModule] = None
