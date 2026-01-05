@@ -1,9 +1,14 @@
 """Audio prompt utilities for DSPy integration."""
 
+import logging
 from typing import List, Optional
 
 from ..character import Character
+from ..scenario_manager import get_scenario_manager
 
+logger = logging.getLogger(__name__)
+
+# 保留作為 fallback
 DEFAULT_AUDIO_CONTEXT_PRIORITY = [
     ("daily_routine_examples", "病房日常"),
     ("treatment_examples", "治療相關"),
@@ -44,11 +49,58 @@ def format_history_for_audio(
     return reminder
 
 
-def build_available_audio_contexts(max_items: int = 2) -> str:
-    lines: List[str] = []
-    for label, desc in DEFAULT_AUDIO_CONTEXT_PRIORITY[:max_items]:
-        lines.append(f"- {label}: {desc}")
-    return "\n".join(lines)
+def build_available_audio_contexts(
+    previous_context: Optional[str] = None,
+    previous_speaker: Optional[str] = None,
+    max_items: int = 3
+) -> str:
+    """動態選擇可用情境（整合 ScenarioManager）
+
+    Args:
+        previous_context: 上一輪推理出的情境（優先列出）
+        previous_speaker: 上一輪推理出的 speaker（用於過濾相關情境）
+        max_items: 最多列出幾個情境
+
+    Returns:
+        格式化的情境列表字串
+    """
+    try:
+        scenario_manager = get_scenario_manager()
+        available = list(scenario_manager.scenarios.keys())
+
+        if not available:
+            raise ValueError("No scenarios loaded")
+
+        prioritized: List[str] = []
+
+        # 1. 若有上一輪情境，優先列出
+        if previous_context and previous_context in available:
+            prioritized.append(previous_context)
+
+        # 2. 若有上一輪 speaker，找出該 speaker 相關的情境
+        if previous_speaker and previous_speaker in scenario_manager.speaker_index:
+            speaker_scenarios = scenario_manager.speaker_index[previous_speaker]
+            for ctx in speaker_scenarios:
+                if ctx not in prioritized:
+                    prioritized.append(ctx)
+                if len(prioritized) >= max_items:
+                    break
+
+        # 3. 補充其他情境
+        for ctx in available:
+            if ctx not in prioritized:
+                prioritized.append(ctx)
+            if len(prioritized) >= max_items:
+                break
+
+        lines = [f"- {ctx}" for ctx in prioritized[:max_items]]
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.warning(f"ScenarioManager 載入失敗，使用 fallback: {e}")
+        # Fallback to original behavior
+        lines = [f"- {label}: {desc}" for label, desc in DEFAULT_AUDIO_CONTEXT_PRIORITY[:max_items]]
+        return "\n".join(lines)
 
 
 def summarize_character(character: Optional[Character]) -> str:
