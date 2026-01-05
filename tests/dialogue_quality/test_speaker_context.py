@@ -248,6 +248,10 @@ def test_with_llm_judge(api_available):
     if not api_available:
         pytest.skip("API 不可用")
 
+    # 初始化 DSPy（設定全域 LM）
+    from src.core.dspy.setup import initialize_dspy
+    initialize_dspy()
+
     from src.core.dspy.llm_judge import ResponseQualityJudge
 
     judge = ResponseQualityJudge()
@@ -267,14 +271,14 @@ def test_with_llm_judge(api_available):
     if not test_cases:
         pytest.skip("無法取得測試資料")
 
-    # 使用關鍵詞評估（快速）
-    results = judge.batch_evaluate(test_cases, use_llm=False)
+    # 使用真正的 LLM 評估（語意理解）
+    results = judge.batch_evaluate(test_cases, use_llm=True)
 
     # 輸出詳細結果供調試
     print(f"\nLLM Judge 結果: 通過率 {results['pass_rate']:.1%}, 平均分 {results['average_score']}")
 
-    # 使用寬鬆閾值（關鍵詞匹配的限制）
-    assert results["average_score"] >= 1.0, (
+    # LLM 評估使用 1-5 分制，3.5 為及格門檻
+    assert results["average_score"] >= 3.5, (
         f"平均分過低: {results['average_score']}"
     )
 
