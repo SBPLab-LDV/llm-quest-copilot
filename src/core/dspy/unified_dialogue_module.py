@@ -52,6 +52,7 @@ JSON_OUTPUT_DIRECTIVE = (
     "- context_judgement: 物件，讓模型自由推理情境與限制（避免死板欄位），包含：\n"
     "  signals: 從 character_details 抽取的關鍵醫療狀態與設定，以簡短片語陣列呈現；\n"
     "  implications: 根據 signals 推理出的行為限制或情境含意，以簡短片語陣列呈現；\n"
+    "  inferred_speaker: 推理出的提問者角色（醫師/護理師/營養師/物理治療師/個案管理師/照顧者 擇一）；\n"
     "  premise_check: 物件（問題前提驗證），包含：\n"
     "    question_assumes: 問題中隱含的前提假設（如手術部位、疾病類型、治療方式、用藥等），簡短片語；\n"
     "    medical_facts: 與該前提相關的病歷事實（從 character_details 抽取），簡短片語；\n"
@@ -231,6 +232,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
 
         # 追蹤最近一次模型輸出情境，做為下輪提示濾器
         self._last_context_label: Optional[str] = None
+        self._last_speaker_role: Optional[str] = None  # 追蹤推理出的提問者角色
         self._fewshot_used = False
 
         # 簡化：一致性檢查停用
@@ -331,6 +333,20 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                     self._last_context_label = normalized_context
             except Exception:
                 pass
+
+            # 從 context_judgement 中提取 inferred_speaker
+            try:
+                ctx_judge = getattr(unified_prediction, 'context_judgement', None)
+                if ctx_judge:
+                    if isinstance(ctx_judge, str):
+                        ctx_judge = json.loads(ctx_judge)
+                    if isinstance(ctx_judge, dict):
+                        inferred_speaker = ctx_judge.get('inferred_speaker')
+                        if inferred_speaker:
+                            self._last_speaker_role = inferred_speaker
+                            logger.debug(f"🎭 Inferred speaker: {inferred_speaker}")
+            except Exception as e:
+                logger.debug(f"Failed to extract inferred_speaker: {e}")
 
             # Detailed reasoning and fields for inspection
             try:
