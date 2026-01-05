@@ -292,6 +292,18 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 getattr(prediction, 'context_classification', 'daily_routine_examples')
             ) or 'daily_routine_examples'
             processing_info = getattr(prediction, 'processing_info', None)
+
+            # 從 context_judgement 中提取 inferred_speaker
+            inferred_speaker_role = None
+            try:
+                ctx_judge = getattr(prediction, 'context_judgement', None)
+                if ctx_judge:
+                    if isinstance(ctx_judge, str):
+                        ctx_judge = json.loads(ctx_judge)
+                    if isinstance(ctx_judge, dict):
+                        inferred_speaker_role = ctx_judge.get('inferred_speaker')
+            except Exception:
+                pass
             
             # 確保回應格式正確
             if isinstance(responses, str):
@@ -362,6 +374,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 "state": state,
                 "dialogue_context": dialogue_context,
                 "context_classification": context_classification,
+                "inferred_speaker_role": inferred_speaker_role,
                 "processing_info": processing_info,
                 "optimization_info": {
                     "api_calls_used": 1,

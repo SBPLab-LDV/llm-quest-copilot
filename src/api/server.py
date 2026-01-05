@@ -127,6 +127,7 @@ class DialogueResponse(BaseModel):
     state: str
     dialogue_context: str
     session_id: str
+    inferred_speaker_role: Optional[str] = None  # 推理出的提問者角色（醫師/護理師/營養師/物理治療師/個案管理師/照顧者）
     speech_recognition_options: Optional[List[str]] = None  # 新增: 語音識別可能的選項
     original_transcription: Optional[str] = None  # 新增: 原始語音轉錄文本
     implementation_version: Optional[str] = None  # Phase 5: 實現版本標記
@@ -801,6 +802,7 @@ async def format_dialogue_response(
             state=response_dict["state"],
             dialogue_context=response_dict["dialogue_context"],
             session_id=current_session_id or str(uuid.uuid4()),
+            inferred_speaker_role=response_dict.get("inferred_speaker_role"),  # 推理出的提問者角色
             speech_recognition_options=response_dict.get("speech_recognition_options", None),
             implementation_version=implementation_version,  # Phase 5: 版本信息
             performance_metrics=metrics_dict,  # Phase 5: 性能指標
