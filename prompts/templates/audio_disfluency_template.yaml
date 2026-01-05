@@ -31,8 +31,8 @@ audio_disfluency: |
   【重要原則】
   1. 完整性：raw_transcript 必須包含所有聽到的片段，keyword_completion 必須處理每個片段
   2. 可追溯：original 中的每個意圖都必須能對應到 keyword_completion 中的某個 completed
-  3. 意圖拆解：將 original 中以逗號 / 頓號分隔的每個短語視為一個「意圖」，依出現順序處理
-  4. 兩段式表達：對每個意圖，優先包含 1 句「直述意願/需求」（第一人稱）與 1 句「請求評估/協助」；若槽位不足，至少保留直述
+  3. 關鍵詞整合：每個選項必須盡量包含 original 中的所有關鍵詞，整合成一個連貫的完整句子，而非將關鍵詞分散到不同選項
+  4. 多樣化表達：{option_count} 個選項應以不同方式整合相同的關鍵詞，包含「直述需求」與「請求評估/協助」等不同語氣
   5. 限制一致（動作vs意圖）：限制條款僅約束「動作/處置」；「意圖直述/請求評估」不屬動作，允許表達。若動作與限制或場域矛盾，改為「請求評估/如何安全地…」
   6. 用語與句式：口語化、單句、繁體中文；不得以與意圖無關的泛用請求（如「調整枕頭」「請對方過來看看」）取代對該意圖的回應
   7. 稱謂規則：以「對方」或「您」稱呼對話者，不預設職稱
@@ -53,11 +53,11 @@ audio_disfluency: |
     ]
   }
 
-  【正確範例】
-  {"raw_transcript": "口...乾...想...水", "keyword_completion": [{"heard": "口", "completed": "口", "confidence": "high"}, {"heard": "乾", "completed": "乾", "confidence": "high"}, {"heard": "想", "completed": "想", "confidence": "high"}, {"heard": "水", "completed": "喝水", "confidence": "medium"}], "original": "口很乾，想喝水", "options": ["我口很乾，想喝點水潤喉", "我現在能喝水嗎？可以請您評估是否適合潤喉或用濕棉棒？", "我喉嚨很乾，喝水會不會嗆到？", "如果不能喝水，能否先用其他方式舒緩？"]}
+  【正確範例】（注意：每個選項都包含「口乾」和「喝水」兩個關鍵詞）
+  {"raw_transcript": "口...乾...想...水", "keyword_completion": [{"heard": "口", "completed": "口", "confidence": "high"}, {"heard": "乾", "completed": "乾", "confidence": "high"}, {"heard": "想", "completed": "想", "confidence": "high"}, {"heard": "水", "completed": "喝水", "confidence": "medium"}], "original": "口很乾，想喝水", "options": ["我口很乾，想喝點水潤喉", "口很乾想喝水，可以請您評估我現在能不能喝？", "我嘴巴乾乾的想喝水，喝水會不會嗆到？", "口乾想喝水，如果不能喝，有其他方式可以舒緩嗎？"]}
 
-  【模糊音推測範例】
-  {"raw_transcript": "我...痛...頭...也...肚", "keyword_completion": [{"heard": "我", "completed": "我", "confidence": "high"}, {"heard": "痛", "completed": "痛", "confidence": "high"}, {"heard": "頭", "completed": "頭", "confidence": "high"}, {"heard": "也", "completed": "腰", "confidence": "low", "reason": "根據疼痛話題，'也'音近'腰'，推測為身體部位"}, {"heard": "肚", "completed": "肚子", "confidence": "medium"}], "original": "頭痛、腰痛、肚子痛", "options": ["我頭很痛，腰和肚子也不舒服", "請問可以幫我檢查一下頭、腰和肚子嗎？", "我現在好幾個地方都在痛，需要止痛藥", "頭痛、腰痛、肚子痛，可以請醫生來看看嗎？"]}
+  【模糊音推測範例】（注意：每個選項都包含「頭」「腰」「肚子」「痛」四個關鍵詞）
+  {"raw_transcript": "我...痛...頭...也...肚", "keyword_completion": [{"heard": "我", "completed": "我", "confidence": "high"}, {"heard": "痛", "completed": "痛", "confidence": "high"}, {"heard": "頭", "completed": "頭", "confidence": "high"}, {"heard": "也", "completed": "腰", "confidence": "low", "reason": "根據疼痛話題，'也'音近'腰'，推測為身體部位"}, {"heard": "肚", "completed": "肚子", "confidence": "medium"}], "original": "頭痛、腰痛、肚子痛", "options": ["我頭很痛，腰和肚子也不舒服", "頭、腰、肚子都在痛，可以幫我檢查一下嗎？", "頭痛加上腰痛和肚子痛，我需要止痛藥", "頭、腰、肚子這幾個地方都痛，可以請醫生來看看嗎？"]}
 
   【失敗時處理】
   - 若完全無法識別，請輸出：
