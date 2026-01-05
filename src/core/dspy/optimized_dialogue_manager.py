@@ -297,13 +297,20 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             inferred_speaker_role = None
             try:
                 ctx_judge = getattr(prediction, 'context_judgement', None)
+                logger.debug(f"🔍 ctx_judge type: {type(ctx_judge)}")
                 if ctx_judge:
                     if isinstance(ctx_judge, str):
-                        ctx_judge = json.loads(ctx_judge)
+                        # 嘗試 JSON 解析，如果失敗則用 ast.literal_eval
+                        try:
+                            ctx_judge = json.loads(ctx_judge)
+                        except json.JSONDecodeError:
+                            import ast
+                            ctx_judge = ast.literal_eval(ctx_judge)
                     if isinstance(ctx_judge, dict):
                         inferred_speaker_role = ctx_judge.get('inferred_speaker')
-            except Exception:
-                pass
+                        logger.info(f"🎭 Extracted inferred_speaker_role: {inferred_speaker_role}")
+            except Exception as e:
+                logger.warning(f"Failed to extract inferred_speaker: {e}")
             
             # 確保回應格式正確
             if isinstance(responses, str):

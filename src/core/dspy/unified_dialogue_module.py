@@ -419,6 +419,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 confidence=getattr(unified_prediction, 'confidence', 1.0),
                 reasoning=getattr(unified_prediction, 'reasoning', ''),
                 context_classification=_class,
+                context_judgement=getattr(unified_prediction, 'context_judgement', None),  # 傳遞 context_judgement 以便提取 inferred_speaker
                 examples_used=0,  # 統一模式下暫不使用範例
                 processing_info={
                     'unified_call': True,
