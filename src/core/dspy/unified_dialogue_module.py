@@ -66,7 +66,13 @@ JSON_OUTPUT_DIRECTIVE = (
     "    medical_facts: 與該前提相關的病歷事實（從 character_details 抽取），簡短片語；\n"
     "    match: true/false（前提是否與病歷相符）；\n"
     "    mismatch_detail: 若不符，簡述矛盾點（可選）。\n"
-    "  generation_policy: 一句話概述生成應遵守的方針（需考量 premise_check 結果）。\n"
+    "  pain_assessment: 若問題涉及疼痛，參考[疼痛評估參考指引]填寫（可選）：\n"
+    "    is_pain_related: 是否為疼痛相關問題（true/false）；\n"
+    "    intensity_hint: 根據病歷推估的疼痛程度範圍（如「4-6分(中度)」），參考指引的 0-10 分級；\n"
+    "    quality_hints: 可能的疼痛性質，從指引詞彙中選擇（如刺痛、悶痛、抽痛）；\n"
+    "    likely_triggers: 可能的加重因素，從指引中選擇（如換藥、活動、吞嚥）；\n"
+    "    relief_options: 可能的緩解方式，從指引中選擇（如止痛藥、冷敷、躺著不動）。\n"
+    "  generation_policy: 一句話概述生成應遵守的方針（需考量 premise_check 結果與 pain_assessment）。\n"
     "- meta_summary: 物件（壓縮自我檢核），涵蓋：\n"
     "  directness_ok(bool), scenario_ok(bool), consistency_ok(bool: 需同時檢查 character_details 與 conversation_history),\n"
     "  premise_ok(bool: 問題前提是否與病歷相符，與 premise_check.match 一致),\n"
@@ -241,7 +247,11 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         # 追蹤最近一次模型輸出情境，做為下輪提示濾器
         self._last_context_label: Optional[str] = None
         self._last_speaker_role: Optional[str] = None  # 追蹤推理出的提問者角色
+        self._last_pain_assessment: Optional[Dict[str, Any]] = None  # 追蹤疼痛評估結果
         self._fewshot_used = False
+
+        # 載入疼痛評估指引（啟動時載入一次，避免重複讀檔）
+        self._pain_guide_context = self._load_pain_guide_context()
 
         # 初始化 ScenarioManager 用於動態載入 few-shot 範例
         try:
@@ -263,7 +273,50 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         }
         
         logger.info("UnifiedDSPyDialogueModule 初始化完成 - 已優化為單一 API 調用")
-    
+
+    def _load_pain_guide_context(self) -> str:
+        """從 pain_assessment_guide.md 載入疼痛評估參考資訊
+
+        這些資訊會注入 prompt，讓 LLM 在 self-annotation 時參考指引內容，
+        生成符合臨床標準的疼痛相關回應。
+
+        Returns:
+            疼痛評估指引的 prompt 片段，若檔案不存在則返回空字串
+        """
+        from pathlib import Path
+
+        guide_path = Path(__file__).parent.parent.parent.parent / "prompts/pain_assessment/pain_assessment_guide.md"
+
+        if not guide_path.exists():
+            logger.debug(f"疼痛評估指引檔案不存在: {guide_path}")
+            return ""
+
+        # 從指引中提取關鍵內容，轉換為 LLM 可參考的 prompt 片段
+        # 注意：這裡不直接讀取整份檔案，而是提供結構化的摘要
+        pain_guide = """[疼痛評估參考指引]
+來源：prompts/pain_assessment/pain_assessment_guide.md
+
+■ 疼痛程度分級（0-10 數字量表）：
+  - 0 分：完全不痛
+  - 1-3 分：輕度疼痛，可以忍受，不太影響日常
+  - 4-6 分：中度疼痛，有點影響日常活動
+  - 7-10 分：重度疼痛，很難忍受
+
+■ 疼痛性質詞彙（病患常用說法）：
+  刺痛/刺刺的、刀割痛、鈍痛/悶悶的、抽痛/一陣一陣、
+  壓痛/脹脹的、燒灼痛/熱熱的、酸痛/酸酸的
+
+■ 常見加重因素：
+  碰觸傷口、翻身移動、下床活動、吞嚥/吃東西、咳嗽、換藥
+
+■ 常見緩解方式：
+  吃止痛藥、躺著不動、熱敷、冷敷、舒適擺位（墊高）、深呼吸
+
+若問題涉及疼痛，請在 context_judgement.pain_assessment 中根據上述指引和病患狀況進行推理。
+"""
+        logger.info("🩹 已載入疼痛評估指引")
+        return pain_guide
+
     def forward(self, user_input: str, character_name: str, character_persona: str,
                 character_backstory: str, character_goal: str, character_details: str,
                 conversation_history: List[str]) -> dspy.Prediction:
@@ -319,9 +372,17 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 except Exception as e:
                     logger.debug(f"Few-shot 載入失敗: {e}")
 
-            # 將 few-shot 範例注入對話歷史
+            # 將疼痛指引和 few-shot 範例注入對話歷史
+            # 疼痛指引總是載入，讓 LLM 自己判斷是否在 pain_assessment 中使用
+            context_additions = []
+            if self._pain_guide_context:
+                context_additions.append(self._pain_guide_context)
             if fewshot_section:
-                formatted_history = f"{fewshot_section}\n\n{formatted_history}"
+                context_additions.append(fewshot_section)
+
+            if context_additions:
+                formatted_history = "\n\n".join(context_additions) + "\n\n" + formatted_history
+                logger.debug(f"📋 已注入 {len(context_additions)} 個 context additions（疼痛指引 + few-shot）")
 
             current_call = self.unified_stats['total_unified_calls'] + 1
             logger.info(f"🚀 Unified DSPy call #{current_call} - {character_name} processing {len(conversation_history)} history entries")
@@ -375,19 +436,29 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             except Exception:
                 pass
 
-            # 從 context_judgement 中提取 inferred_speaker
+            # 從 context_judgement 中提取 inferred_speaker 和 pain_assessment
             try:
                 ctx_judge = getattr(unified_prediction, 'context_judgement', None)
                 if ctx_judge:
                     if isinstance(ctx_judge, str):
                         ctx_judge = json.loads(ctx_judge)
                     if isinstance(ctx_judge, dict):
+                        # 提取 inferred_speaker
                         inferred_speaker = ctx_judge.get('inferred_speaker')
                         if inferred_speaker:
                             self._last_speaker_role = inferred_speaker
                             logger.debug(f"🎭 Inferred speaker: {inferred_speaker}")
+
+                        # 提取 pain_assessment（用於追蹤和品質監控）
+                        pain_assessment = ctx_judge.get('pain_assessment')
+                        if pain_assessment:
+                            self._last_pain_assessment = pain_assessment
+                            is_pain = pain_assessment.get('is_pain_related', False)
+                            if is_pain:
+                                logger.debug(f"🩹 Pain assessment: intensity={pain_assessment.get('intensity_hint')}, "
+                                           f"quality={pain_assessment.get('quality_hints')}")
             except Exception as e:
-                logger.debug(f"Failed to extract inferred_speaker: {e}")
+                logger.debug(f"Failed to extract context_judgement fields: {e}")
 
             # Detailed reasoning and fields for inspection
             try:
