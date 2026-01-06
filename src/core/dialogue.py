@@ -138,7 +138,7 @@ class DialogueManager:
         """
         try:
             # 記錄用戶輸入
-            self.conversation_history.append(f"護理人員: {user_input}")
+            self.conversation_history.append(f"對話方: {user_input}")
             
             # 使用 PromptManager 生成提示詞
             prompt = self.prompt_manager.generate_prompt(

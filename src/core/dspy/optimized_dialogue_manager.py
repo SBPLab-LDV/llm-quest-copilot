@@ -122,18 +122,18 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             last_user_input = None
             if self.conversation_history:
                 for entry in reversed(self.conversation_history):
-                    if entry.startswith("護理人員: "):
-                        last_user_input = entry[5:]  # 移除 "護理人員: " 前綴
+                    if entry.startswith("對話方: "):
+                        last_user_input = entry[4:]  # 移除 "對話方: " 前綴
                         break
             
             is_duplicate_input = (last_user_input == user_input)
             
             # 只有不是重複輸入時才記錄到對話歷史
             if not is_duplicate_input and not is_echo_of_patient:
-                self.conversation_history.append(f"護理人員: {user_input}")
+                self.conversation_history.append(f"對話方: {user_input}")
                 self.logger.info(f"✅ 新輸入已記錄到對話歷史")
             else:
-                reason = "與上一輪護理人員輸入重複" if is_duplicate_input else "與上一輪病患選擇回覆相同(回聲抑制)"
+                reason = "與上一輪對話方輸入重複" if is_duplicate_input else "與上一輪病患選擇回覆相同(回聲抑制)"
                 self.logger.info(f"⚠️ 跳過記錄到對話歷史：{reason}")
             
             # 使用優化的統一對話模組 (僅1次 API 調用)
@@ -644,10 +644,10 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             )
 
             # Replace the last caregiver entry with the rewritten question for context continuity
-            if self.conversation_history and self.conversation_history[-1].startswith("護理人員: "):
-                self.conversation_history[-1] = f"護理人員(重述): {rewritten_question}"
+            if self.conversation_history and self.conversation_history[-1].startswith("對話方: "):
+                self.conversation_history[-1] = f"對話方(重述): {rewritten_question}"
             else:
-                self.conversation_history.append(f"護理人員(重述): {rewritten_question}")
+                self.conversation_history.append(f"對話方(重述): {rewritten_question}")
 
             rewritten_prediction = self.dialogue_module(
                 user_input=rewritten_question,

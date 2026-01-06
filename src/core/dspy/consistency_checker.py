@@ -246,8 +246,8 @@ class DialogueConsistencyChecker:
     def _get_last_patient_utterance(history: List[str]) -> str:
         if not history:
             return ""
-        # 非「護理人員: 」開頭的條目視為病患/系統；取最後一個非護理人員條目
+        # 非「對話方: 」開頭的條目視為病患/系統；取最後一個非對話方條目
         for entry in reversed(history):
-            if not str(entry).startswith("護理人員:"):
+            if not str(entry).startswith("對話方:"):
                 return str(entry)
         return ""

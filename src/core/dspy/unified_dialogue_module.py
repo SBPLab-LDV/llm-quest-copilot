@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
 from dspy.adapters import JSONAdapter
-from dspy.adapters.utils import format_field_value, translate_field_type
+from dspy.adapters.utils import format_field_value
 from dspy.dsp.utils.settings import settings
 
 from .dialogue_module import DSPyDialogueModule
@@ -853,7 +853,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         recent = non_system[-window_lines:]
 
         def _is_caregiver(line: str) -> bool:
-            return isinstance(line, str) and line.strip().startswith("護理人員:")
+            return isinstance(line, str) and line.strip().startswith("對話方:")
 
         def _is_system(line: str) -> bool:
             s = line.strip() if isinstance(line, str) else ""
