@@ -185,7 +185,11 @@ def api_available():
 
 @pytest.mark.parametrize("case", SPEAKER_CONTEXT_TEST_CASES, ids=lambda c: c["name"])
 def test_speaker_inference(case: Dict[str, Any], api_available):
-    """測試對話方角色推理是否正確"""
+    """測試對話方角色推理是否正確
+
+    注意：inferred_speaker_role 已棄用，此測試現在只驗證 API 回應正常
+    角色推理已整合到 context_classification 中
+    """
     if not api_available:
         pytest.skip("API 不可用")
 
@@ -194,12 +198,10 @@ def test_speaker_inference(case: Dict[str, Any], api_available):
     if "error" in response:
         pytest.fail(f"API 錯誤: {response['error']}")
 
-    inferred = response.get("inferred_speaker_role", "")
-    acceptable = case.get("acceptable_speakers", [case["expected_speaker"]])
-
-    assert inferred in acceptable, (
-        f"角色推理錯誤：預期 {acceptable}，實際 {inferred}"
-    )
+    # inferred_speaker_role 已棄用，現在總是回傳 None
+    # 改為驗證 dialogue_context 有正常回傳
+    dialogue_context = response.get("dialogue_context", "")
+    assert dialogue_context, "dialogue_context 應該有值"
 
 
 @pytest.mark.parametrize("case", SPEAKER_CONTEXT_TEST_CASES, ids=lambda c: c["name"])
@@ -306,11 +308,11 @@ def run_manual_evaluation():
             print(f"錯誤: {response['error']}")
             continue
 
-        # 檢查角色推理
-        inferred = response.get("inferred_speaker_role", "N/A")
-        speaker_ok = inferred == case["expected_speaker"]
-        print(f"推理角色: {inferred} {'✅' if speaker_ok else '❌'}")
-        print(f"對話情境: {response.get('dialogue_context', 'N/A')}")
+        # 檢查情境（inferred_speaker_role 已棄用）
+        dialogue_context = response.get("dialogue_context", "N/A")
+        context_ok = case["expected_context"] in dialogue_context if dialogue_context != "N/A" else False
+        print(f"對話情境: {dialogue_context} {'✅' if context_ok else '⚠️'}")
+        print(f"（注意：inferred_speaker_role 已棄用，改用 context_classification）")
 
         # 顯示回應
         responses = response.get("responses", [])
@@ -333,7 +335,7 @@ def run_manual_evaluation():
 
         results.append({
             "name": case["name"],
-            "speaker_ok": speaker_ok,
+            "context_ok": context_ok,
             "eval_pass": eval_result["pass"],
             "score": eval_result["overall_score"],
         })
@@ -343,11 +345,11 @@ def run_manual_evaluation():
     print("統計結果")
     print("=" * 60)
 
-    speaker_correct = sum(1 for r in results if r["speaker_ok"])
+    context_correct = sum(1 for r in results if r["context_ok"])
     eval_passed = sum(1 for r in results if r["eval_pass"])
     avg_score = sum(r["score"] for r in results) / len(results) if results else 0
 
-    print(f"角色推理正確: {speaker_correct}/{len(results)}")
+    print(f"情境判斷正確: {context_correct}/{len(results)}")
     print(f"適切性通過: {eval_passed}/{len(results)}")
     print(f"平均分數: {avg_score:.2f}")
 

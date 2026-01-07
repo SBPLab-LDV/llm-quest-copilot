@@ -127,7 +127,7 @@ class DialogueResponse(BaseModel):
     state: str
     dialogue_context: str
     session_id: str
-    inferred_speaker_role: Optional[str] = None  # 推理出的提問者角色（醫師/護理師/營養師/物理治療師/個案管理師/照顧者）
+    inferred_speaker_role: Optional[str] = None  # [已棄用] 保留欄位，總是回傳 None
     speech_recognition_options: Optional[List[str]] = None  # 新增: 語音識別可能的選項
     original_transcription: Optional[str] = None  # 新增: 原始語音轉錄文本
     raw_transcript: Optional[str] = None  # Self-annotation: 原始轉錄片段

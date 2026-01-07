@@ -53,14 +53,6 @@ JSON_OUTPUT_DIRECTIVE = (
     "- context_judgement: 物件，讓模型自由推理情境與限制（避免死板欄位），包含：\n"
     "  signals: 從 character_details 抽取的關鍵醫療狀態與設定，以簡短片語陣列呈現；\n"
     "  implications: 根據 signals 推理出的行為限制或情境含意，以簡短片語陣列呈現；\n"
-    "  inferred_speaker: 推理出的提問者角色，根據問題內容判斷：\n"
-    "    - 醫師：討論診斷、治療方案、手術結果、檢查報告、腫瘤指數、病情變化\n"
-    "    - 護理師：日常照護、生命徵象、給藥、傷口換藥、一般問候\n"
-    "    - 營養師：飲食計畫、營養補充品、體重追蹤、熱量攝取、進食狀況\n"
-    "    - 物理治療師：復健運動、張嘴練習、舌頭運動、肌肉訓練、活動能力\n"
-    "    - 個案管理師：出院準備、後續追蹤、社會資源、長期照護\n"
-    "    - 照顧者：家屬關心、日常起居、情緒支持、陪伴照顧\n"
-    "    （擇一，請根據問題特徵判斷，避免預設護理師）；\n"
     "  premise_check: 物件（問題前提驗證），包含：\n"
     "    question_assumes: 問題中隱含的前提假設（如手術部位、疾病類型、治療方式、用藥等），簡短片語；\n"
     "    medical_facts: 與該前提相關的病歷事實（從 character_details 抽取），簡短片語；\n"
@@ -246,7 +238,6 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
 
         # 追蹤最近一次模型輸出情境，做為下輪提示濾器
         self._last_context_label: Optional[str] = None
-        self._last_speaker_role: Optional[str] = None  # 追蹤推理出的提問者角色
         self._last_pain_assessment: Optional[Dict[str, Any]] = None  # 追蹤疼痛評估結果
         self._fewshot_used = False
 
@@ -349,23 +340,22 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             # 獲取精簡後的可用情境清單
             available_contexts = self._build_available_contexts()
 
-            # 動態載入 few-shot 範例（基於上輪推理結果 + 關鍵字匹配）
+            # 動態載入 few-shot 範例（基於上輪推理的情境）
             fewshot_section = ""
             if self.scenario_manager:
                 try:
                     # 第一輪對話：使用 bootstrap examples 確保多角色覆蓋
-                    if self._last_context_label is None and self._last_speaker_role is None:
+                    if self._last_context_label is None:
                         examples = self.scenario_manager.get_bootstrap_examples()
                         logger.debug(f"📚 第一輪：載入 {len(examples)} 個 bootstrap 範例（多角色覆蓋）")
                     else:
-                        # 後續輪次：使用上輪推理結果載入精準範例
+                        # 後續輪次：基於上輪情境載入範例
                         examples = self.scenario_manager.get_examples(
                             user_input=user_input,
                             previous_context=self._last_context_label,
-                            previous_speaker=self._last_speaker_role,
                             max_examples=3
                         )
-                        logger.debug(f"📚 後續輪：載入 {len(examples)} 個精準範例")
+                        logger.debug(f"📚 後續輪：載入 {len(examples)} 個情境範例 (context={self._last_context_label})")
 
                     if examples:
                         fewshot_section = self.scenario_manager.format_examples_for_prompt(examples)
@@ -436,20 +426,13 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             except Exception:
                 pass
 
-            # 從 context_judgement 中提取 inferred_speaker 和 pain_assessment
+            # 從 context_judgement 中提取 pain_assessment（用於追蹤和品質監控）
             try:
                 ctx_judge = getattr(unified_prediction, 'context_judgement', None)
                 if ctx_judge:
                     if isinstance(ctx_judge, str):
                         ctx_judge = json.loads(ctx_judge)
                     if isinstance(ctx_judge, dict):
-                        # 提取 inferred_speaker
-                        inferred_speaker = ctx_judge.get('inferred_speaker')
-                        if inferred_speaker:
-                            self._last_speaker_role = inferred_speaker
-                            logger.debug(f"🎭 Inferred speaker: {inferred_speaker}")
-
-                        # 提取 pain_assessment（用於追蹤和品質監控）
                         pain_assessment = ctx_judge.get('pain_assessment')
                         if pain_assessment:
                             self._last_pain_assessment = pain_assessment

@@ -65,19 +65,13 @@ class TestKeywordIndex:
         assert len(scenarios) >= 1, "應該找到至少一個匹配的情境"
 
 
-class TestSpeakerFilter:
-    """測試 Speaker 過濾功能"""
+class TestSpeakerIndex:
+    """測試 Speaker 索引功能"""
 
-    def test_get_examples_with_speaker_filter(self):
-        """驗證 speaker 過濾正確運作"""
+    def test_speaker_index_built(self):
+        """驗證 speaker 索引正確建立"""
         sm = ScenarioManager()
-        examples = sm.get_examples_for_context(
-            context="營養諮詢",
-            speaker_filter="營養師",
-            max_examples=5,
-        )
-        for ex in examples:
-            assert "營養師" in ex["speakers"], f"應只包含營養師: {ex['speakers']}"
+        assert len(sm.speaker_index) > 0, "speaker 索引為空"
 
     def test_get_all_speakers(self):
         """驗證取得所有 speaker 角色"""
@@ -110,7 +104,6 @@ class TestExamplesRetrieval:
         examples = sm.get_examples(
             user_input="傷口",
             previous_context=None,
-            previous_speaker=None,
             max_examples=3,
         )
         assert len(examples) > 0, "應該找到範例"
@@ -121,7 +114,6 @@ class TestExamplesRetrieval:
         examples = sm.get_examples(
             user_input="任意輸入",
             previous_context="營養諮詢",
-            previous_speaker="營養師",
             max_examples=5,
         )
         # 應該優先載入上一輪情境的範例

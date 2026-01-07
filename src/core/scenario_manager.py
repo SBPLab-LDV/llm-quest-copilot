@@ -5,7 +5,6 @@ Scenario Manager - 管理 prompts/scenarios/ 下的情境 YAML 檔案
 1. 載入所有 scenario YAML 檔案
 2. 建立關鍵字索引，用於快速匹配
 3. 提供 few-shot 範例給 LLM 使用
-4. 支援 speaker 角色過濾
 """
 
 import logging
@@ -171,14 +170,12 @@ class ScenarioManager:
     def get_examples_for_context(
         self,
         context: str,
-        speaker_filter: Optional[str] = None,
         max_examples: int = 3,
     ) -> List[Dict[str, Any]]:
         """取得特定情境的範例
 
         Args:
             context: 情境名稱（中文或英文 ID）
-            speaker_filter: 只取特定 speaker 的問題（可選）
             max_examples: 最多回傳幾個範例
 
         Returns:
@@ -192,12 +189,6 @@ class ScenarioManager:
         if not questions:
             return []
 
-        # 過濾 speaker
-        if speaker_filter:
-            questions = [
-                q for q in questions if speaker_filter in q.get("speakers", [])
-            ]
-
         # 回傳前 N 個
         return questions[:max_examples]
 
@@ -205,15 +196,13 @@ class ScenarioManager:
         self,
         user_input: str,
         previous_context: Optional[str] = None,
-        previous_speaker: Optional[str] = None,
         max_examples: int = 5,
     ) -> List[Dict[str, Any]]:
-        """智慧載入 few-shot 範例（與 self-annotation 協同）
+        """載入 few-shot 範例（基於情境）
 
         Args:
             user_input: 當前使用者輸入
             previous_context: 上一輪推理出的情境
-            previous_speaker: 上一輪推理出的 speaker
             max_examples: 最多回傳幾個範例
 
         Returns:
@@ -225,7 +214,6 @@ class ScenarioManager:
         if previous_context:
             matched = self.get_examples_for_context(
                 context=previous_context,
-                speaker_filter=previous_speaker,
                 max_examples=3,
             )
             examples.extend(matched)
@@ -379,9 +367,9 @@ def test_scenario_manager():
         formatted = sm.format_examples_for_prompt(examples)
         print(formatted)
 
-        # 測試 speaker 索引
-        print(f"\n5. Speaker 列表:")
-        print(f"   {sm.get_all_speakers()}")
+        # 測試情境列表
+        print(f"\n5. 情境列表:")
+        print(f"   {list(sm.scenarios.keys())}")
 
         print("\n✅ ScenarioManager 測試完成")
         return True
