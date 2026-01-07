@@ -36,13 +36,10 @@ JSON_OUTPUT_DIRECTIVE = (
     "禁止添加 [[ ## field ## ]]、markdown 或任何額外文字，完整輸出後以 } 結束。"
     "responses 必須為 JSON 陣列（雙引號字串的陣列），不可加整段引號或使用 Python list 表示法（不得使用單引號）。"
     "必須遵守上方提供的規則欄位（例如 term_usage_rules、response_style_rules、persona_voice_rules）。"
-    "\n\n[欄位定義 - 必須包含]\n"
-    "- core_question: 對 user_input 的核心重述，簡短自然的片語或短句。\n"
-    "- prior_facts: 與本次回答最相關的事實陣列（最多 3 條，簡短片語），來源於 character_details 與 conversation_history；"
-    "  至少嘗試包含 1 條源自最近對話視窗的事實；若近期對話沒有合適事實，請不要硬湊或臆造，可僅列出 character_details 的事實。\n"
-    "- context_judgement: 物件，包含：\n"
-    "  premise_check: 問題前提驗證，包含 question_assumes、medical_facts、match(bool)、mismatch_detail(可選)；\n"
-    "  pain_assessment: 若涉及疼痛則填寫 is_pain_related、intensity_hint（可選）。\n"
+    "\n\n[欄位定義]\n"
+    "- core_question: 問題核心重述。\n"
+    "- prior_facts: 最多 3 條相關事實（優先引用對話歷史）。\n"
+    "- context_judgement: 包含 premise_check（驗證問題前提）、pain_assessment（疼痛相關時填寫）。\n"
     "【視角規範】所有回應必須以病患第一人稱表述，禁止醫護視角動詞（詢問/建議/安排/提醒/我們會）。\n"
     "所有 responses 必須與 context_judgement 的推論一致。\n"
     "【問題前提驗證】當問題中隱含的前提假設與 character_details 不符時：\n"
@@ -161,21 +158,12 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         # 預設規則片段（可被 Optimizer/設定覆蓋）
         # 用語規範：避免職稱稱呼；若不得不提，嚴禁「護士」，一律使用「護理師」。
         self._default_term_usage_rules = (
-            "【用語規範】回應不得以職稱稱呼對方；避免使用如『醫師』『護理師』等稱謂。"
-            "若不得不提職稱，嚴禁使用『護士』，一律使用『護理師』稱呼。"
+            "【用語規範】不用職稱稱呼對方；如需提及職稱，用『護理師』不用『護士』。"
         )
         # 數值問句專用風格規範（與 JSON_OUTPUT_DIRECTIVE 相輔相成；可被 Optimizer 覆寫）
         self._default_numeric_response_style_rules = (
-            "【數值回答政策】\n"
-            "- 嚴禁將不實數字包裝為事實；若無確證，不要斷言具體數字。\n"
-            "- 若有確定數字，僅在 1 句中以肯定語氣提供；不得把同一數字換句話說以湊多樣性。\n"
-            "- 在無確證時，允許提出 2 個『候選數字』，需以『印象/大概/可能』修飾。\n"
-            "- 五句應呈現互斥意圖：肯定數字（若有）/ 候選#1 / 候選#2 / 其他具體但簡短的細節 / 不確定（最多 1 句）。\n"
-            "- 二元『有/沒有』不受此數字臆測限制；可在候選或釐清語句中自然帶出。\n\n"
-            "【五槽位多樣性】（五句各取其一，不得重覆）\n"
-            "【格式/語氣】\n"
-            "- 單句、具體、自然、繁體中文；五句互不重覆，意圖取向不同。\n"
-            "- 避免模板化或空泛表述；『不確定/不太記得/能不能再說一次』等不確定語氣最多允許出現 1 次；其餘句子須提供具體內容（候選數字+修飾詞或其他簡短細節）。"
+            "【數值問句】若無確證不斷言數字；有確定數字則 1 句肯定引用；"
+            "無確證時可提 2 個候選數字（印象/大概/可能修飾）。"
         )
 
         # 病患語氣與知識邊界規則：限制專業語氣與臆測，強化第一人稱感受表述
