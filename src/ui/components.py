@@ -132,8 +132,8 @@ def create_chat_ui():
     Returns:
         UI 組件集合
     """
-    with gr.Blocks(theme=gr.themes.Soft(), title="醫護對話系統 v0.2") as app:
-        gr.Markdown("# 醫護對話系統 v0.2")
+    with gr.Blocks(theme=gr.themes.Soft(), title="醫護對話系統 v0.3.2") as app:
+        gr.Markdown("# 醫護對話系統 v0.3.2")
         gr.Markdown("使用此界面與虛擬病患進行對話。您可以選擇不同的角色和回應格式。")
         
         with gr.Row():
