@@ -23,12 +23,9 @@ from ..scenario_manager import get_scenario_manager
 logger = logging.getLogger(__name__)
 
 JSON_OUTPUT_DIRECTIVE = (
-    "[指示] 僅輸出單一 JSON 物件，至少包含欄位 reasoning, character_consistency_check, context_classification, "
-    "responses，並且必須同時輸出 core_question, prior_facts, context_judgement, meta_summary。必須維持合法 JSON 語法，"
+    "[指示] 僅輸出單一 JSON 物件，包含欄位 reasoning, context_classification, responses, core_question, prior_facts, context_judgement。必須維持合法 JSON 語法，"
     "所有鍵與值皆用雙引號，禁止輸出 None/null/True/False 或未封閉的字串。不得輸出任何分析或思考步驟，"
-    "請直接輸出 JSON 物件（不要附加除 JSON 以外的文字）。reasoning 請簡短、自然，不必精確限制字數。"
-    "reasoning 請簡短說明：如何根據 core_question 與（若存在且相關）1 條來自 conversation_history 最近視窗的 prior_fact，"
-    "以及 context_judgement.generation_policy 來產生這 4 句回應。"
+    "請直接輸出 JSON 物件（不要附加除 JSON 以外的文字）。reasoning 請簡短說明如何產生這 4 句回應。"
     "responses 必須是一個長度為 4 的 JSON 陣列；每個元素為一句簡短、自然、彼此獨立且互斥的完整繁體中文句子，"
     "且每句都需直接回應 user_input 的核心主題，自然提及相關詞彙，不可偏題或答非所問。"
     "4 句需涵蓋不同的回應取向（例如：肯定、否定、不確定、提供具體但簡短的細節），"
@@ -50,37 +47,14 @@ JSON_OUTPUT_DIRECTIVE = (
     "- core_question: 對 user_input 的核心重述，簡短自然的片語或短句。\n"
     "- prior_facts: 與本次回答最相關的事實陣列（最多 3 條，簡短片語），來源於 character_details 與 conversation_history；"
     "  至少嘗試包含 1 條源自最近對話視窗的事實；若近期對話沒有合適事實，請不要硬湊或臆造，可僅列出 character_details 的事實。\n"
-    "- context_judgement: 物件，讓模型自由推理情境與限制（避免死板欄位），包含：\n"
-    "  signals: 從 character_details 抽取的關鍵醫療狀態與設定，以簡短片語陣列呈現；\n"
-    "  implications: 根據 signals 推理出的行為限制或情境含意，以簡短片語陣列呈現；\n"
-    "  premise_check: 物件（問題前提驗證），包含：\n"
-    "    question_assumes: 問題中隱含的前提假設（如手術部位、疾病類型、治療方式、用藥等），簡短片語；\n"
-    "    medical_facts: 與該前提相關的病歷事實（從 character_details 抽取），簡短片語；\n"
-    "    match: true/false（前提是否與病歷相符）；\n"
-    "    mismatch_detail: 若不符，簡述矛盾點（可選）。\n"
-    "  pain_assessment: 若問題涉及疼痛，參考[疼痛評估參考指引]填寫（可選）：\n"
-    "    is_pain_related: 是否為疼痛相關問題（true/false）；\n"
-    "    intensity_hint: 根據病歷推估的疼痛程度範圍（如「4-6分(中度)」），參考指引的 0-10 分級；\n"
-    "    quality_hints: 可能的疼痛性質，從指引詞彙中選擇（如刺痛、悶痛、抽痛）；\n"
-    "    likely_triggers: 可能的加重因素，從指引中選擇（如換藥、活動、吞嚥）；\n"
-    "    relief_options: 可能的緩解方式，從指引中選擇（如止痛藥、冷敷、躺著不動）。\n"
-    "  generation_policy: 一句話概述生成應遵守的方針（需考量 premise_check 結果與 pain_assessment）。\n"
-    "- meta_summary: 物件（壓縮自我檢核），涵蓋：\n"
-    "  directness_ok(bool), scenario_ok(bool), consistency_ok(bool: 需同時檢查 character_details 與 conversation_history),\n"
-    "  premise_ok(bool: 問題前提是否與病歷相符，與 premise_check.match 一致),\n"
-    "  has_yes_and_no(bool，用於二元問句), numeric_support(\"confirmed\"/\"candidates\"/\"none\"),\n"
-    "  history_anchor(bool，可選，是否引用了最近對話事實)；\n"
-    "  notes(可選，若 premise_ok=false 或發現不一致，請以極短片語指出矛盾並說明回應策略)。\n"
-    "【視角規範】reasoning 與 context_judgement.generation_policy 必須以『病患回應選項生成』的角度表述；\n"
-    "禁止使用『詢問／請您／建議／安排／提醒／我們會』等醫護或系統視角動詞。\n"
-    "generation_policy 應描述生成病患第一人稱選項的策略。\n"
-    "所有 responses 必須與 context_judgement 的推論一致；若某些候選違反，請在內部刪除並只輸出合格的 4 句。\n"
-    "【問題前提驗證】當問題中隱含的前提假設（如手術部位、疾病類型、用藥、治療方式）與 character_details 不符時：\n"
+    "- context_judgement: 物件，包含：\n"
+    "  premise_check: 問題前提驗證，包含 question_assumes、medical_facts、match(bool)、mismatch_detail(可選)；\n"
+    "  pain_assessment: 若涉及疼痛則填寫 is_pain_related、intensity_hint（可選）。\n"
+    "【視角規範】所有回應必須以病患第一人稱表述，禁止醫護視角動詞（詢問/建議/安排/提醒/我們會）。\n"
+    "所有 responses 必須與 context_judgement 的推論一致。\n"
+    "【問題前提驗證】當問題中隱含的前提假設與 character_details 不符時：\n"
     "- premise_check.match 必須設為 false；\n"
-    "- meta_summary.premise_ok 必須設為 false；\n"
-    "- character_consistency_check 應設為 NO；\n"
     "- responses 應以病患視角質疑或澄清錯誤前提，指出實際病歷事實；\n"
-    "- 至少 2 句應質疑前提，其餘可表達困惑或請對方確認；\n"
     "- 禁止順著錯誤前提回答，必須先澄清事實。"
 )
 
@@ -116,16 +90,13 @@ class UnifiedPatientResponseSignature(dspy.Signature):
 
     # 輸出欄位（必填）
     reasoning = dspy.OutputField(desc="推理與一致性檢查")
-    character_consistency_check = dspy.OutputField(desc="角色一致性 YES/NO（包含問題前提與病歷的一致性檢查，若前提不符應為 NO）")
     context_classification = dspy.OutputField(desc="情境分類 ID")
-    confidence = dspy.OutputField(desc="情境信心 0-1（可省略，由系統補值）")
     responses = dspy.OutputField(desc="四個病患回應，嚴禁包含任何括號、動作描述、肢體語言或省略號（...），只輸出流暢完整的純口語句子")
     # 推薦輸出：便於後處理與審核
     core_question = dspy.OutputField(desc="對問題核心的簡短重述")
     prior_facts = dspy.OutputField(desc="最多三條相關事實")
     context_judgement = dspy.OutputField(desc="情境自由推理與生成方針")
-    meta_summary = dspy.OutputField(desc="壓縮自我檢核摘要")
-    # state / dialogue_context / state_reasoning 由後處理自動補齊（不在 Signature 強制）
+    # 已移除：character_consistency_check, confidence, meta_summary（僅 debug 用，減少 LLM 輸出 tokens）
 
 
 
@@ -308,6 +279,23 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         logger.info("🩹 已載入疼痛評估指引")
         return pain_guide
 
+    def _is_pain_related_query(self, user_input: str) -> bool:
+        """檢查是否為疼痛相關問題
+
+        使用擴展關鍵字列表確保不遺漏疼痛相關問題
+
+        Args:
+            user_input: 使用者輸入的問題
+
+        Returns:
+            True 如果問題涉及疼痛相關詞彙
+        """
+        pain_keywords = [
+            "痛", "疼", "不舒服", "難受",  # 基本關鍵字
+            "酸", "麻", "刺", "脹",         # 擴展關鍵字
+        ]
+        return any(kw in user_input for kw in pain_keywords)
+
     def forward(self, user_input: str, character_name: str, character_persona: str,
                 character_backstory: str, character_goal: str, character_details: str,
                 conversation_history: List[str]) -> dspy.Prediction:
@@ -363,16 +351,19 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                     logger.debug(f"Few-shot 載入失敗: {e}")
 
             # 將疼痛指引和 few-shot 範例注入對話歷史
-            # 疼痛指引總是載入，讓 LLM 自己判斷是否在 pain_assessment 中使用
+            # 疼痛指引只在問題涉及疼痛時載入，減少非疼痛問題的 prompt 大小
             context_additions = []
-            if self._pain_guide_context:
+            if self._pain_guide_context and self._is_pain_related_query(user_input):
                 context_additions.append(self._pain_guide_context)
+                logger.info("🩹 檢測到疼痛相關問題，注入疼痛評估指引")
+            elif self._pain_guide_context:
+                logger.info("📝 非疼痛問題，跳過疼痛評估指引（節省 prompt 空間）")
             if fewshot_section:
                 context_additions.append(fewshot_section)
 
             if context_additions:
                 formatted_history = "\n\n".join(context_additions) + "\n\n" + formatted_history
-                logger.debug(f"📋 已注入 {len(context_additions)} 個 context additions（疼痛指引 + few-shot）")
+                logger.debug(f"📋 已注入 {len(context_additions)} 個 context additions")
 
             current_call = self.unified_stats['total_unified_calls'] + 1
             logger.info(f"🚀 Unified DSPy call #{current_call} - {character_name} processing {len(conversation_history)} history entries")
