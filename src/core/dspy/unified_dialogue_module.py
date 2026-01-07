@@ -71,6 +71,7 @@ class UnifiedPatientResponseSignature(dspy.Signature):
     character_goal = dspy.InputField(desc="病患目標")
     character_details = dspy.InputField(desc="關鍵病情資訊")
     conversation_history = dspy.InputField(desc="近期對話與提醒")
+    fewshot_examples = dspy.InputField(desc="回應格式示範範例")
     available_contexts = dspy.InputField(desc="候選情境")
 
     # 輸入欄位（可優化規則區塊：提供給 DSPy Optimizer 作為 prompt 片段）
@@ -235,27 +236,38 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             return ""
 
         # 從指引中提取關鍵內容，轉換為 LLM 可參考的 prompt 片段
-        # 注意：這裡不直接讀取整份檔案，而是提供結構化的摘要
-        pain_guide = """[疼痛評估參考指引]
-來源：prompts/pain_assessment/pain_assessment_guide.md
+        # Phase 7: 臨床推理框架版本 - 連結治療階段與預期疼痛模式
+        pain_guide = """[疼痛評估推理指引]
 
-■ 疼痛程度分級（0-10 數字量表）：
-  - 0 分：完全不痛
-  - 1-3 分：輕度疼痛，可以忍受，不太影響日常
-  - 4-6 分：中度疼痛，有點影響日常活動
-  - 7-10 分：重度疼痛，很難忍受
+■ 推理步驟：
+  1. 從 character_details 識別：診斷、治療階段、手術部位
+  2. 根據治療階段推估預期疼痛程度：
+     - 術後 1-3 天：中重度（4-7 分），傷口刺痛/脹痛
+     - 術後 1-2 週：輕中度（2-5 分），逐漸緩解
+     - 術後 1 個月以上：輕度或無痛（0-3 分）
+     - 化療期間：黏膜炎疼痛，可能中度
+     - 放療期間：照射部位灼熱感
 
-■ 疼痛性質詞彙（病患常用說法）：
-  刺痛/刺刺的、刀割痛、鈍痛/悶悶的、抽痛/一陣一陣、
-  壓痛/脹脹的、燒灼痛/熱熱的、酸痛/酸酸的
+■ 病患視角的疼痛描述對照：
+  輕度(1-3分)：「有一點點」「還好」「可以忍受」「偶爾刺一下」
+  中度(4-6分)：「蠻痛的」「有點難受」「會影響吃東西」「吃藥才能緩解」
+  重度(7-10分)：「很痛」「受不了」「痛到睡不著」
 
-■ 常見加重因素：
-  碰觸傷口、翻身移動、下床活動、吞嚥/吃東西、咳嗽、換藥
+■ 疼痛性質與情境對照：
+  傷口痛（術後/換藥）：刺刺的、割割的、碰到會痛
+  發炎痛（感染/黏膜炎）：腫腫的、脹脹的、熱熱的
+  神經痛（神經損傷）：像電到、麻麻的、一陣一陣抽痛
 
-■ 常見緩解方式：
-  吃止痛藥、躺著不動、熱敷、冷敷、舒適擺位（墊高）、深呼吸
+■ 口腔癌術後常見：
+  加重：吞嚥、張嘴、說話、碰觸傷口、換藥
+  緩解：止痛藥、少說話、流質飲食、休息
 
-若問題涉及疼痛，請在 context_judgement.pain_assessment 中根據上述指引和病患狀況進行推理。
+■ 重要提醒：
+  - 「止痛藥」專指止痛藥物（普拿疼、嗎啡類等），不包含抗生素（如阿莫西林）
+  - 回應應符合 character_details 中的治療階段
+  - 在 context_judgement.pain_assessment 中記錄推理過程
+
+請根據上述指引，從病患視角生成符合其治療階段的疼痛描述。
 """
         logger.info("🩹 已載入疼痛評估指引")
         return pain_guide
@@ -331,20 +343,18 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 except Exception as e:
                     logger.debug(f"Few-shot 載入失敗: {e}")
 
-            # 將疼痛指引和 few-shot 範例注入對話歷史
+            # 疼痛指引注入對話歷史（它是「提醒」性質，屬於 conversation_history）
             # 疼痛指引只在問題涉及疼痛時載入，減少非疼痛問題的 prompt 大小
-            context_additions = []
             if self._pain_guide_context and self._is_pain_related_query(user_input):
-                context_additions.append(self._pain_guide_context)
+                formatted_history = self._pain_guide_context + "\n\n" + formatted_history
                 logger.info("🩹 檢測到疼痛相關問題，注入疼痛評估指引")
             elif self._pain_guide_context:
                 logger.info("📝 非疼痛問題，跳過疼痛評估指引（節省 prompt 空間）")
-            if fewshot_section:
-                context_additions.append(fewshot_section)
 
-            if context_additions:
-                formatted_history = "\n\n".join(context_additions) + "\n\n" + formatted_history
-                logger.debug(f"📋 已注入 {len(context_additions)} 個 context additions")
+            # few-shot 範例獨立傳遞，不混入 conversation_history（語意分離）
+            fewshot_for_input = fewshot_section if fewshot_section else ""
+            if fewshot_for_input:
+                logger.debug(f"📚 Few-shot 範例獨立傳遞（長度: {len(fewshot_for_input)} 字元）")
 
             current_call = self.unified_stats['total_unified_calls'] + 1
             logger.info(f"🚀 Unified DSPy call #{current_call} - {character_name} processing {len(conversation_history)} history entries")
@@ -372,6 +382,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                     character_goal=character_goal,
                     character_details=character_details,
                     conversation_history=formatted_history,
+                    fewshot_examples=fewshot_for_input,
                     available_contexts=available_contexts,
                     term_usage_rules=term_rules,
                     response_style_rules=style_rules,
