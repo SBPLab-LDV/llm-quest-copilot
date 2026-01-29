@@ -5,6 +5,8 @@ import os
 import base64
 import json
 import hashlib
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 from ..core.audio.context_utils import (
     format_history_for_audio,
@@ -13,16 +15,55 @@ from ..core.audio.context_utils import (
     build_audio_template_rules,
 )
 from ..core.dspy.audio_modules import get_audio_prompt_composer
-from typing import Optional
+from ..utils.settings import DEFAULT_GEMINI_MODEL, get_gemini_model
 
 class GeminiClient:
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        generation_config: Optional[Dict[str, Any]] = None,
+    ):
         config = load_config()
-        genai.configure(api_key=config['google_api_key'])
-        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
-        # Create a multimodal model instance for audio processing
-        self.multimodal_model = genai.GenerativeModel('gemini-2.0-flash-exp')
         self.logger = logging.getLogger(__name__)
+
+        # API key
+        effective_api_key = api_key or config.get("google_api_key")
+        genai.configure(api_key=effective_api_key)
+
+        # Model name
+        # Safety: if the user hasn't opted into the new `llm:` schema, keep the
+        # historical default model to avoid behavior changes.
+        raw_has_llm = bool((config.get("_meta") or {}).get("raw_has_llm"))
+        if model:
+            self.model_name = model
+        elif raw_has_llm:
+            self.model_name = get_gemini_model(config)
+        else:
+            self.model_name = DEFAULT_GEMINI_MODEL
+
+        # Generation config
+        default_generation_config: Dict[str, Any] = {
+            "temperature": 0.9,
+            "top_p": 0.8,
+            "top_k": 40,
+            "max_output_tokens": 2048,
+        }
+        if generation_config:
+            merged = dict(default_generation_config)
+            merged.update(generation_config)
+            self.generation_config = merged
+        else:
+            llm_generation = ((config.get("llm") or {}).get("generation") or {}) if raw_has_llm else {}
+            merged = dict(default_generation_config)
+            if isinstance(llm_generation, dict):
+                merged.update({k: v for k, v in llm_generation.items() if v is not None})
+            self.generation_config = merged
+
+        self.model = genai.GenerativeModel(self.model_name)
+        # Create a multimodal model instance for audio processing
+        self.multimodal_model = genai.GenerativeModel(self.model_name)
         self.logging_cfg = config.get('logging', {}) or {}
         self.audio_cfg = config.get('audio', {}) or {}
         self._prompt_manager = None
@@ -58,7 +99,7 @@ class GeminiClient:
         try:
             # 詳細記錄發送給 API 的請求
             self.logger.info(f"===== 發送請求到 Gemini API =====")
-            self.logger.info(f"模型: gemini-2.0-flash-exp")
+            self.logger.info("模型: %s", self.model_name)
             # 安全地處理 prompt 日誌
             if isinstance(prompt, str):
                 self.logger.debug(f"提示詞: {prompt[:100]}... (截斷顯示)")
@@ -66,13 +107,8 @@ class GeminiClient:
                 self.logger.debug(f"提示詞類型: {type(prompt)}, 內容: {str(prompt)[:100]}... (截斷顯示)")
             
             # 設定生成參數以確保更好的格式控制
-            generation_config = {
-                "temperature": 0.9,
-                "top_p": 0.8,
-                "top_k": 40,
-                "max_output_tokens": 2048,
-            }
-            self.logger.debug(f"生成參數: {generation_config}")
+            generation_config = dict(self.generation_config)
+            self.logger.info("生成參數: %s", generation_config)
             
             safety_settings = [
                 {
@@ -103,6 +139,17 @@ class GeminiClient:
             # 記錄 API 回傳的結果
             self.logger.info(f"===== 接收到 Gemini API 回應 =====")
             self.logger.debug(f"回應長度: {len(response.text)}")
+            try:
+                candidates = getattr(response, "candidates", None) or []
+                finish_reason = None
+                if candidates:
+                    finish_reason = getattr(candidates[0], "finish_reason", None)
+                prompt_feedback = getattr(response, "prompt_feedback", None)
+                self.logger.info("Gemini finish_reason: %s", finish_reason)
+                if prompt_feedback is not None:
+                    self.logger.info("Gemini prompt_feedback: %s", prompt_feedback)
+            except Exception:
+                self.logger.debug("Failed to read Gemini finish_reason/prompt_feedback", exc_info=True)
             
             # 紀錄最初和最後的一部分回應
             response_text = response.text.strip()
@@ -164,6 +211,7 @@ class GeminiClient:
             option_count = int(self.audio_cfg.get('option_count', 4) or 4)
             prompt_via_dspy = bool(self.audio_cfg.get('prompt_via_dspy', False))
             use_context = bool(self.audio_cfg.get('use_context', False))
+            template_variant = str(self.audio_cfg.get("template_variant", "full")).lower()
 
             # Diagnostics: log audio configuration
             self.logger.info(
@@ -184,12 +232,21 @@ class GeminiClient:
                     history_text = ""
             available_contexts = build_available_audio_contexts() if use_context else ""
             template_rules = build_audio_template_rules(option_count)
+            if template_variant in {"compact", "short", "lite"}:
+                template_rules = ""
 
             self._last_trace_id = trace_id
             self._last_audio_template_rules = template_rules
 
             if prompt_via_dspy:
-                composer = get_audio_prompt_composer()
+                template_path = None
+                template_path_raw = self.audio_cfg.get("template_path")
+                if template_path_raw:
+                    template_path = Path(str(template_path_raw))
+                else:
+                    if template_variant in {"compact", "short", "lite"}:
+                        template_path = Path("prompts/templates/audio_disfluency_template_compact.yaml")
+                composer = get_audio_prompt_composer(template_path=template_path)
                 # Diagnostics: record and log signature/inputs presence
                 sig_name = None
                 try:
@@ -199,8 +256,9 @@ class GeminiClient:
                 self._last_audio_used_dspy = True
                 self._last_audio_signature = sig_name
                 self.logger.info(
-                    "[DSPy] Using AudioPromptComposerModule (Signature=%s) | profile_len=%s, history_len=%s, contexts_len=%s, rules_len=%s",
+                    "[DSPy] Using AudioPromptComposerModule (Signature=%s, template=%s) | profile_len=%s, history_len=%s, contexts_len=%s, rules_len=%s",
                     sig_name,
+                    template_path.name if template_path else "default",
                     len(character_profile or ""),
                     len(history_text or ""),
                     len(available_contexts or ""),
@@ -276,14 +334,17 @@ class GeminiClient:
                     ]
                 }
 
+            audio_max_tokens = int(self.audio_cfg.get("max_output_tokens", 1024) or 1024)
             generation_config = {
                 "temperature": 0.3,
                 "top_p": 0.95,
                 "top_k": 40,
-                "max_output_tokens": 1024,
+                "max_output_tokens": audio_max_tokens,
+                "response_mime_type": "application/json",
             }
 
             self.logger.info("調用 Gemini 多模態 API 進行音頻識別")
+            self.logger.info("音頻識別生成參數: %s", generation_config)
             response = self.multimodal_model.generate_content(
                 content,
                 generation_config=generation_config
@@ -292,6 +353,17 @@ class GeminiClient:
             result_text = response.text.strip()
             self._last_audio_raw = result_text
             self.logger.info("===== 音頻識別完成 =====")
+            try:
+                candidates = getattr(response, "candidates", None) or []
+                finish_reason = None
+                if candidates:
+                    finish_reason = getattr(candidates[0], "finish_reason", None)
+                prompt_feedback = getattr(response, "prompt_feedback", None)
+                self.logger.info("Gemini (audio) finish_reason: %s", finish_reason)
+                if prompt_feedback is not None:
+                    self.logger.info("Gemini (audio) prompt_feedback: %s", prompt_feedback)
+            except Exception:
+                self.logger.debug("Failed to read Gemini audio finish_reason/prompt_feedback", exc_info=True)
             try:
                 if self.logging_cfg.get('llm_raw', False):
                     max_len = int(self.logging_cfg.get('max_chars', 8000))
@@ -304,15 +376,78 @@ class GeminiClient:
             except Exception:
                 pass
 
-            cleaned_text = result_text
-            if cleaned_text.startswith('```json'):
-                cleaned_text = cleaned_text[7:]
-            if cleaned_text.endswith('```'):
-                cleaned_text = cleaned_text[:-3]
-            cleaned_text = cleaned_text.strip()
+            def _clean_json_payload(payload: str) -> str:
+                cleaned = payload.strip()
+                if cleaned.startswith('```json'):
+                    cleaned = cleaned[7:]
+                if cleaned.endswith('```'):
+                    cleaned = cleaned[:-3]
+                return cleaned.strip()
 
-            try:
-                json_result = json.loads(cleaned_text)
+            def _parse_audio_json(payload: str) -> Optional[dict]:
+                cleaned = _clean_json_payload(payload)
+                try:
+                    return json.loads(cleaned)
+                except json.JSONDecodeError:
+                    return None
+
+            json_result = _parse_audio_json(result_text)
+            if json_result is None:
+                self.logger.warning("音頻 JSON 解析失敗，嘗試重新請求更精簡輸出")
+                fallback_prompt = (
+                    "請直接輸出單一合法 JSON，不要任何 Markdown 或說明文字。\n"
+                    "格式如下：\n"
+                    "{\n"
+                    f"  \"raw_transcript\": \"完整轉錄，用...分隔，若不清楚寫無法識別\",\n"
+                    "  \"keyword_completion\": [\n"
+                    "    {\"heard\": \"片段\", \"completed\": \"補全詞\", \"confidence\": \"high/medium/low\", \"reason\": \"\"}\n"
+                    "  ],\n"
+                    "  \"original\": \"根據補全詞組成的短句\",\n"
+                    f"  \"options\": [\"句子1\", \"句子2\", \"句子3\", \"句子4\"]\n"
+                    "}\n"
+                    "限制：keyword_completion 最多 8 個項目；options 必須恰好 4 句。\n"
+                    "若無法識別，輸出：\n"
+                    "{\"raw_transcript\":\"無法識別\",\"keyword_completion\":[],\"original\":\"無法識別\",\"options\":[\"我需要協助重新表達剛才的需求\",\"能否請您幫我重述或慢一點說\",\"我想請對方幫我確認我剛才想表達的事情\",\"我需要協助確認我的需要，謝謝\"]}"
+                )
+                retry_content = {
+                    "parts": [
+                        {"text": fallback_prompt},
+                        {
+                            "inline_data": {
+                                "mime_type": mime_type,
+                                "data": base64.b64encode(audio_data).decode('utf-8')
+                            }
+                        }
+                    ]
+                }
+                retry_config = dict(generation_config)
+                retry_config["temperature"] = 0.2
+                retry_response = self.multimodal_model.generate_content(
+                    retry_content,
+                    generation_config=retry_config
+                )
+                retry_text = retry_response.text.strip()
+                self.logger.info("===== 音頻識別重試完成 =====")
+                try:
+                    candidates = getattr(retry_response, "candidates", None) or []
+                    finish_reason = None
+                    if candidates:
+                        finish_reason = getattr(candidates[0], "finish_reason", None)
+                    self.logger.info("Gemini (audio retry) finish_reason: %s", finish_reason)
+                except Exception:
+                    self.logger.debug("Failed to read Gemini audio retry finish_reason", exc_info=True)
+                if self.logging_cfg.get('llm_raw', False):
+                    max_len = int(self.logging_cfg.get('max_chars', 8000))
+                    prefix = ''
+                    if session_id or trace_id:
+                        prefix = f"[session={session_id or ''} trace={trace_id or ''}] "
+                    self.logger.info(f"{prefix}LM OUT (audio/raw/retry): {retry_text[:max_len]}")
+                json_result = _parse_audio_json(retry_text)
+                if json_result is None:
+                    self.logger.error("重試後仍無法解析音頻 JSON")
+                    json_result = None
+
+            if json_result is not None:
 
                 # 驗證必要欄位（不降級，缺少則返回錯誤）
                 raw_transcript = json_result.get('raw_transcript')
@@ -323,21 +458,16 @@ class GeminiClient:
                 # 嚴格驗證：必須包含 raw_transcript
                 if raw_transcript is None:
                     self.logger.error("Gemini 返回格式錯誤：缺少 raw_transcript")
-                    error_result = json.dumps({
-                        "error": "格式錯誤：缺少 raw_transcript",
-                        "raw_transcript": "",
-                        "keyword_completion": [],
-                        "original": "語音識別格式錯誤，請重試",
-                        "options": ["語音識別格式錯誤，請重試"]
-                    }, ensure_ascii=False)
-                    self._last_audio_clean = error_result
-                    return error_result
+                    json_result = None
 
                 # 嚴格驗證：必須包含 keyword_completion
-                if keyword_completion is None or not isinstance(keyword_completion, list):
+                if json_result is not None and (keyword_completion is None or not isinstance(keyword_completion, list)):
                     self.logger.error("Gemini 返回格式錯誤：缺少或無效的 keyword_completion")
+                    json_result = None
+
+                if json_result is None:
                     error_result = json.dumps({
-                        "error": "格式錯誤：缺少 keyword_completion",
+                        "error": "格式錯誤：缺少必要欄位",
                         "raw_transcript": raw_transcript or "",
                         "keyword_completion": [],
                         "original": "語音識別格式錯誤，請重試",
@@ -366,17 +496,17 @@ class GeminiClient:
                         prefix = f"[session={session_id or ''} trace={trace_id or ''}] "
                     self.logger.info(f"{prefix}LM OUT (audio/clean): {self._last_audio_clean[:max_len]}")
                 return self._last_audio_clean
-            except json.JSONDecodeError:
-                self.logger.error(f"回應不是 JSON 格式: {result_text}")
-                error_result = json.dumps({
-                    "error": "JSON 解析錯誤",
-                    "raw_transcript": "",
-                    "keyword_completion": [],
-                    "original": "語音識別格式錯誤，請重試",
-                    "options": ["語音識別格式錯誤，請重試"]
-                }, ensure_ascii=False)
-                self._last_audio_clean = error_result
-                return error_result
+
+            self.logger.error(f"回應不是 JSON 格式: {result_text}")
+            error_result = json.dumps({
+                "error": "JSON 解析錯誤",
+                "raw_transcript": "",
+                "keyword_completion": [],
+                "original": "語音識別格式錯誤，請重試",
+                "options": ["語音識別格式錯誤，請重試"]
+            }, ensure_ascii=False)
+            self._last_audio_clean = error_result
+            return error_result
 
         except Exception as e:
             self.logger.error(f"音頻識別失敗: {e}", exc_info=True)

@@ -95,7 +95,7 @@ def restore_dspy_config(original_enabled: bool):
         config['dspy']['enabled'] = original_enabled
         
         # 寫入配置
-        with open('/app/config.yaml', 'w', encoding='utf-8') as f:
+        with open('/app/config/config.yaml', 'w', encoding='utf-8') as f:
             yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
         
         print(f"  ✅ DSPy 配置已恢復")

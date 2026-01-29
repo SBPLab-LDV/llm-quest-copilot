@@ -65,14 +65,16 @@ class AudioPromptComposerModule(dspy.Module):
         )
 
 
-_composer_singleton: Optional[AudioPromptComposerModule] = None
+_composer_cache: dict[Path, AudioPromptComposerModule] = {}
 
 
-def get_audio_prompt_composer() -> AudioPromptComposerModule:
-    global _composer_singleton
-    if _composer_singleton is None:
-        _composer_singleton = AudioPromptComposerModule()
-    return _composer_singleton
+def get_audio_prompt_composer(template_path: Optional[Path] = None) -> AudioPromptComposerModule:
+    path = template_path or Path("prompts/templates/audio_disfluency_template.yaml")
+    cached = _composer_cache.get(path)
+    if cached is None:
+        cached = AudioPromptComposerModule(template_path=path)
+        _composer_cache[path] = cached
+    return cached
 
 
 __all__ = [

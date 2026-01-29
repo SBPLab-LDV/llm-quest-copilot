@@ -248,13 +248,18 @@ class BaseDSPyLM(dspy.LM):
             if not isinstance(obj, dict):
                 return text
 
-            # 僅要求統一輸出所需的 5 個欄位
+            # Fill missing fields with defaults to prevent JSONAdapter failures.
+            # Note: Unified DSPy signature expects additional fields; keeping this
+            # centralized avoids brittle downstream parsing.
             required = [
                 "reasoning",
                 "character_consistency_check",
                 "context_classification",
                 "confidence",
                 "responses",
+                "core_question",
+                "prior_facts",
+                "context_judgement",
             ]
 
             defaults = {
@@ -263,6 +268,9 @@ class BaseDSPyLM(dspy.LM):
                 "context_classification": "unspecified",
                 "confidence": "0.00",
                 "responses": [],
+                "core_question": "",
+                "prior_facts": [],
+                "context_judgement": {},
             }
 
             for key in required:
@@ -282,6 +290,11 @@ class BaseDSPyLM(dspy.LM):
                 obj["responses"] = [str(x) for x in obj["responses"][:5]]
             else:
                 obj["responses"] = [str(obj["responses"])]
+
+            if not isinstance(obj.get("prior_facts"), list):
+                obj["prior_facts"] = []
+            if not isinstance(obj.get("context_judgement"), dict):
+                obj["context_judgement"] = {}
 
             try:
                 conf = float(obj.get("confidence", "0.90"))

@@ -2,21 +2,20 @@ import os
 import yaml
 from typing import Dict, Any
 from ..core.character import Character
+from .settings import load_settings, get_gemini_api_key
 
 def load_config() -> Dict[str, Any]:
     """讀取設定檔"""
-    try:
-        with open('config/config.yaml', 'r', encoding='utf-8') as file:
-            config = yaml.safe_load(file) or {}
-    except FileNotFoundError:
-        config = {}
+    # Single source of truth: config/config.yaml (with legacy-key compatibility)
+    config = load_settings("config/config.yaml")
 
     if 'input_mode' not in config:
         config['input_mode'] = 'text'
     if 'voice_input_duration' not in config:
         config['voice_input_duration'] = 5
     if 'google_api_key' not in config or not config['google_api_key']:
-        config['google_api_key'] = os.getenv('GOOGLE_API_KEY')
+        api_key = get_gemini_api_key(config)
+        config['google_api_key'] = api_key
         if not config['google_api_key']:
             raise ValueError("找不到 Google API Key")
 
