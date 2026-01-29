@@ -12,6 +12,11 @@ import asyncio
 import logging
 import json
 
+# NOTE: This file is a manual diagnosis script and is not meant to run in CI.
+# The project has removed the non-optimized and legacy implementations.
+import pytest
+pytest.skip("manual diagnosis script (optimized-only)", allow_module_level=True)
+
 # 設置詳細日誌
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)

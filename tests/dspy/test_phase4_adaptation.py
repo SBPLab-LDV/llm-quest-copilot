@@ -228,7 +228,7 @@ if __name__ == "__main__":
     
     # 執行測試
     tests = [
-        test_dialogue_manager_dspy_creation,
+        test_optimized_dialogue_manager_creation,
         test_dialogue_factory,
         test_interface_compatibility,
         test_configuration_switching
