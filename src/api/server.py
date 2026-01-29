@@ -709,7 +709,7 @@ async def format_dialogue_response(
 
     # 規範化 responses：在非 optimized 實現下才執行深度規範化
     try:
-        impl = session.get("implementation_version", "original") if session else "original"
+        impl = session.get("implementation_version", "optimized") if session else "optimized"
         if impl != "optimized":
             res = response_dict.get("responses")
             if isinstance(res, list) and len(res) == 1 and isinstance(res[0], str):
@@ -780,7 +780,7 @@ async def format_dialogue_response(
         logger.warning(f"規範化 responses 失敗: {_e}")
     
     # Phase 5: 準備版本信息和性能指標
-    implementation_version = "original"
+    implementation_version = "optimized"
     if session and "implementation_version" in session:
         implementation_version = session["implementation_version"]
     
@@ -873,11 +873,7 @@ def create_dialogue_manager_with_monitoring(character: Character, log_dir: str =
             logger.warning(f"設定 chat_gui 檔名失敗（將使用預設）: {_e}")
         
         # 檢測實現版本
-        implementation_version = "original"
-        if hasattr(manager, 'optimization_enabled') and manager.optimization_enabled:
-            implementation_version = "optimized"
-        elif hasattr(manager, 'dspy_enabled') and manager.dspy_enabled:
-            implementation_version = "dspy"
+        implementation_version = "optimized"
         
         logger.info(f"成功創建對話管理器: {type(manager).__name__} (版本: {implementation_version})")
         return manager, implementation_version, log_path
@@ -913,18 +909,8 @@ async def get_performance_stats():
 
 @app.get("/api/monitor/comparison")
 async def get_comparison_report():
-    """獲取 DSPy vs 原始實現對比報告"""
-    try:
-        performance_monitor = get_performance_monitor()
-        comparison_report = performance_monitor.get_comparison_report()
-        
-        return {
-            "status": "success",
-            "report": comparison_report
-        }
-    except Exception as e:
-        logger.error(f"獲取對比報告失敗: {e}")
-        raise HTTPException(status_code=500, detail=f"對比報告獲取失敗: {str(e)}")
+    """(Deprecated) 獲取對比報告（original 已移除，故不再提供）"""
+    raise HTTPException(status_code=410, detail="comparison report removed (original implementation removed)")
 
 @app.get("/api/monitor/errors")
 async def get_error_summary(hours: int = 24):
@@ -1042,26 +1028,8 @@ async def get_health_status():
 
 @app.post("/api/health/fallback")
 async def manual_fallback(request: dict = Body(...)):
-    """手動觸發或停用回退機制"""
-    try:
-        enable = request.get("enable", False)
-        reason = request.get("reason", "手動操作")
-        
-        health_monitor = get_health_monitor()
-        success = health_monitor.manual_fallback(enable, reason)
-        
-        if success:
-            return {
-                "status": "success",
-                "message": f"回退機制已{'啟用' if enable else '停用'}",
-                "reason": reason
-            }
-        else:
-            raise HTTPException(status_code=500, detail="回退操作失敗")
-            
-    except Exception as e:
-        logger.error(f"手動回退操作失敗: {e}")
-        raise HTTPException(status_code=500, detail=f"回退操作失敗: {str(e)}")
+    """(Deprecated) 手動回退（fail-fast 模式已移除 legacy fallback）"""
+    raise HTTPException(status_code=410, detail="fallback removed (fail-fast; no legacy implementation)")
 
 @app.post("/api/health/thresholds")
 async def update_health_thresholds(request: dict = Body(...)):
@@ -1367,7 +1335,7 @@ async def process_audio_dialogue(
         pass
     
     # 獲取實現版本信息
-    implementation_version = "original"
+    implementation_version = "optimized"
     if session and "implementation_version" in session:
         implementation_version = session["implementation_version"]
     

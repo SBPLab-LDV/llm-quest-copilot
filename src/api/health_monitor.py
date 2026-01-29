@@ -1,7 +1,8 @@
 """
-健康監控和自動回退機制
+健康監控（Fail-fast 模式）
 
-監控 DSPy 實現的健康狀況，在必要時自動回退到原始實現。
+本專案已移除 original/legacy 回退機制：只監控現行 implementation（通常為 optimized），
+不再自動或手動切換實現。
 """
 
 import time
@@ -11,8 +12,6 @@ from datetime import datetime, timedelta
 from collections import deque
 from dataclasses import dataclass
 import threading
-import yaml
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +29,10 @@ class HealthStatus:
 class HealthMonitor:
     """健康監控器"""
     
-    def __init__(self, config_path: str = None):
+    def __init__(self):
         """
         初始化健康監控器
-        
-        Args:
-            config_path: 配置文件路径
         """
-        self.config_path = config_path or "/app/config/config.yaml"
         self.lock = threading.Lock()
         
         # 健康檢查閾值（可配置）
@@ -46,13 +41,10 @@ class HealthMonitor:
             "max_response_time": 10.0,  # 10秒響應時間閾值
             "max_recent_errors": 5,  # 最近5個錯誤的閾值
             "check_interval": 60,  # 檢查間隔（秒）
-            "recovery_time": 300  # 恢復等待時間（秒）
         }
         
         # 狀態追蹤
         self.last_check_time = 0
-        self.fallback_enabled = False
-        self.fallback_start_time = None
         self.health_history = deque(maxlen=100)
         
         logger.info("健康監控器初始化完成")
@@ -81,7 +73,8 @@ class HealthMonitor:
         
         health_statuses = {}
         
-        for impl_name in ["dspy", "original"]:
+        impl_names = list(current_stats.keys()) or ["optimized"]
+        for impl_name in impl_names:
             issues = []
             is_healthy = True
             
@@ -134,9 +127,6 @@ class HealthMonitor:
                 "statuses": health_statuses
             })
         
-        # 檢查是否需要觸發自動回退
-        self._evaluate_fallback(health_statuses)
-        
         return health_statuses
     
     def _get_cached_health_status(self) -> Dict[str, HealthStatus]:
@@ -145,85 +135,10 @@ class HealthMonitor:
             if self.health_history:
                 return self.health_history[-1]["statuses"]
             else:
-                # 返回默認狀態
+                # 返回默認狀態（僅 optimized）
                 return {
-                    "dspy": HealthStatus("dspy", True, 0.0, 0.0, 0, datetime.now(), []),
-                    "original": HealthStatus("original", True, 0.0, 0.0, 0, datetime.now(), [])
+                    "optimized": HealthStatus("optimized", True, 0.0, 0.0, 0, datetime.now(), []),
                 }
-    
-    def _evaluate_fallback(self, health_statuses: Dict[str, HealthStatus]):
-        """
-        評估是否需要觸發自動回退
-        
-        Args:
-            health_statuses: 當前健康狀況
-        """
-        dspy_status = health_statuses.get("dspy")
-        original_status = health_statuses.get("original")
-        
-        # 如果 DSPy 不健康但原始實現健康，觸發回退
-        if (dspy_status and not dspy_status.is_healthy and 
-            original_status and original_status.is_healthy):
-            
-            if not self.fallback_enabled:
-                logger.warning("DSPy 實現不健康，觸發自動回退到原始實現")
-                logger.warning(f"DSPy 問題: {', '.join(dspy_status.issues)}")
-                self._enable_fallback()
-        
-        # 如果回退已啟用，檢查是否可以恢復
-        elif self.fallback_enabled and dspy_status and dspy_status.is_healthy:
-            if (self.fallback_start_time and 
-                time.time() - self.fallback_start_time > self.thresholds["recovery_time"]):
-                logger.info("DSPy 實現已恢復健康，停用自動回退")
-                self._disable_fallback()
-    
-    def _enable_fallback(self):
-        """啟用回退機制"""
-        with self.lock:
-            self.fallback_enabled = True
-            self.fallback_start_time = time.time()
-        
-        # 更新配置文件，禁用 DSPy
-        self._update_config(dspy_enabled=False, reason="自動回退")
-    
-    def _disable_fallback(self):
-        """停用回退機制"""
-        with self.lock:
-            self.fallback_enabled = False
-            self.fallback_start_time = None
-        
-        # 更新配置文件，啟用 DSPy
-        self._update_config(dspy_enabled=True, reason="自動恢復")
-    
-    def _update_config(self, dspy_enabled: bool, reason: str):
-        """
-        更新配置文件
-        
-        Args:
-            dspy_enabled: 是否啟用 DSPy
-            reason: 修改原因
-        """
-        try:
-            # 讀取當前配置
-            with open(self.config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-            
-            # 更新 DSPy 配置
-            if 'dspy' not in config:
-                config['dspy'] = {}
-            
-            config['dspy']['enabled'] = dspy_enabled
-            config['dspy']['auto_fallback_reason'] = reason
-            config['dspy']['last_auto_change'] = datetime.now().isoformat()
-            
-            # 寫回配置文件
-            with open(self.config_path, 'w', encoding='utf-8') as f:
-                yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
-            
-            logger.info(f"配置已更新: DSPy enabled={dspy_enabled}, 原因={reason}")
-            
-        except Exception as e:
-            logger.error(f"更新配置文件失敗: {e}")
     
     def manual_fallback(self, enable: bool, reason: str = "手動操作") -> bool:
         """
@@ -236,28 +151,14 @@ class HealthMonitor:
         Returns:
             操作是否成功
         """
-        try:
-            if enable:
-                logger.info(f"手動啟用回退: {reason}")
-                self._enable_fallback()
-            else:
-                logger.info(f"手動停用回退: {reason}")
-                self._disable_fallback()
-            
-            return True
-        except Exception as e:
-            logger.error(f"手動回退操作失敗: {e}")
-            return False
+        logger.warning("manual_fallback is not supported (fail-fast; no legacy fallback).")
+        return False
     
     def get_status(self) -> Dict[str, Any]:
         """獲取健康監控狀態"""
         with self.lock:
             return {
-                "fallback_enabled": self.fallback_enabled,
-                "fallback_start_time": (
-                    datetime.fromtimestamp(self.fallback_start_time).isoformat()
-                    if self.fallback_start_time else None
-                ),
+                "fallback_supported": False,
                 "last_check_time": (
                     datetime.fromtimestamp(self.last_check_time).isoformat()
                     if self.last_check_time else None

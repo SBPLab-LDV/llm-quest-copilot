@@ -14,6 +14,11 @@ import requests
 import time
 import uuid
 
+# NOTE: This file is a manual integration script and is not meant to run in CI.
+# The project has removed the legacy/original implementation and runs optimized DSPy only.
+import pytest
+pytest.skip("manual integration test (legacy/original removed; optimized-only)", allow_module_level=True)
+
 def enable_dspy_config():
     """啟用 DSPy 配置"""
     try:

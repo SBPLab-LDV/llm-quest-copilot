@@ -1,7 +1,8 @@
 """
 API 性能監控和統計模組
 
-用於追蹤 DSPy 和原始實現的性能指標、使用統計和錯誤率。
+本專案已全面採用 DSPy optimized 實作，因此性能監控以 "optimized" 為主，
+並保留對其他 implementation key 的動態支援（避免 KeyError）。
 """
 
 import time
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RequestMetrics:
     """單次請求的性能指標"""
-    implementation: str  # "dspy" or "original"
+    implementation: str  # e.g. "optimized"
     endpoint: str       # API 端點名稱
     start_time: float
     end_time: float
@@ -63,7 +64,7 @@ class PerformanceMonitor:
         self.request_history: deque = deque(maxlen=max_history)
         self.lock = threading.Lock()
         
-        # 使用 defaultdict 動態創建統計 - 支援任何實現類型包括 'optimized'
+        # 使用 defaultdict 動態創建統計 - 支援任何實現類型
         def create_default_stats():
             return {
                 "total_requests": 0,
@@ -75,9 +76,8 @@ class PerformanceMonitor:
         
         self.stats = defaultdict(create_default_stats)
         
-        # 預先初始化已知的實現類型
-        for impl in ["dspy", "original", "optimized"]:
-            _ = self.stats[impl]  # 觸發默認值創建
+        # 預先初始化主要實現類型
+        _ = self.stats["optimized"]
         
         logger.info(f"性能監控器初始化，支援動態實現類型，最大歷史記錄數: {max_history}")
     
@@ -87,7 +87,7 @@ class PerformanceMonitor:
         開始一次請求的監控
         
         Args:
-            implementation: 實現類型 ("dspy" or "original")
+            implementation: 實現類型（例如 "optimized"）
             endpoint: API 端點
             character_id: 角色ID
             session_id: 會話ID
@@ -220,73 +220,37 @@ class PerformanceMonitor:
         cutoff_time = datetime.now() - timedelta(hours=hours)
         
         with self.lock:
-            error_summary = {
-                "dspy": {"total": 0, "by_endpoint": defaultdict(int), "recent_errors": []},
-                "original": {"total": 0, "by_endpoint": defaultdict(int), "recent_errors": []}
-            }
-            
+            error_summary: Dict[str, Any] = {}
+
+            # Create buckets for all known implementations (dynamic).
+            for impl_name in self.stats.keys():
+                error_summary[impl_name] = {
+                    "total": 0,
+                    "by_endpoint": defaultdict(int),
+                    "recent_errors": [],
+                }
+
             for impl_name, stats in self.stats.items():
                 recent_errors = [
-                    error for error in stats["recent_errors"] 
+                    error for error in stats["recent_errors"]
                     if error["timestamp"] >= cutoff_time
                 ]
-                
-                error_summary[impl_name]["total"] = len(recent_errors)
-                error_summary[impl_name]["recent_errors"] = recent_errors
-                
+
+                bucket = error_summary.setdefault(
+                    impl_name,
+                    {"total": 0, "by_endpoint": defaultdict(int), "recent_errors": []},
+                )
+                bucket["total"] = len(recent_errors)
+                bucket["recent_errors"] = recent_errors
+
                 for error in recent_errors:
-                    error_summary[impl_name]["by_endpoint"][error["endpoint"]] += 1
-            
+                    bucket["by_endpoint"][error["endpoint"]] += 1
+
             return error_summary
     
     def get_comparison_report(self) -> Dict[str, Any]:
-        """獲取 DSPy vs 原始實現的對比報告"""
-        stats = self.get_current_stats()
-        
-        if "dspy" not in stats or "original" not in stats:
-            return {"error": "需要兩種實現都有數據才能對比"}
-        
-        dspy_stats = stats["dspy"]
-        original_stats = stats["original"]
-        
-        # 計算改進比例
-        def calculate_improvement(dspy_val, original_val, lower_is_better=True):
-            if original_val == 0:
-                return None
-            
-            improvement = (original_val - dspy_val) / original_val * 100
-            return improvement if lower_is_better else -improvement
-        
-        response_time_improvement = calculate_improvement(
-            dspy_stats.avg_response_time,
-            original_stats.avg_response_time,
-            lower_is_better=True
-        )
-        
-        error_rate_improvement = calculate_improvement(
-            dspy_stats.error_rate,
-            original_stats.error_rate,
-            lower_is_better=True
-        )
-        
-        return {
-            "comparison_time": datetime.now(),
-            "dspy": asdict(dspy_stats),
-            "original": asdict(original_stats),
-            "improvements": {
-                "response_time_improvement_percent": response_time_improvement,
-                "error_rate_improvement_percent": error_rate_improvement
-            },
-            "summary": {
-                "total_requests": dspy_stats.total_requests + original_stats.total_requests,
-                "dspy_usage_percent": (
-                    dspy_stats.total_requests / 
-                    (dspy_stats.total_requests + original_stats.total_requests) * 100
-                    if (dspy_stats.total_requests + original_stats.total_requests) > 0
-                    else 0
-                )
-            }
-        }
+        """歷史功能：DSPy vs 原始實現對比（已移除 original，故不再提供）。"""
+        return {"error": "comparison report is not supported (original implementation removed)"}
     
     def reset_stats(self):
         """重置統計數據"""

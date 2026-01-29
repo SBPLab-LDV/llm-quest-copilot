@@ -2,20 +2,20 @@
 """
 Phase 4 適配層測試
 
-測試 DialogueManagerDSPy 和工廠模式的功能，
-確保適配層能正常工作。
+測試 OptimizedDialogueManagerDSPy 與工廠模式的功能，
+確保專案已完全切換到 optimized DSPy（fail-fast，不再回退 legacy）。
 """
 
 import sys
 sys.path.insert(0, '/app')
 
-def test_dialogue_manager_dspy_creation():
-    """測試 DSPy 對話管理器創建"""
-    print("🧪 測試 DSPy 對話管理器創建...")
+def test_optimized_dialogue_manager_creation():
+    """測試 Optimized DSPy 對話管理器創建"""
+    print("🧪 測試 Optimized DSPy 對話管理器創建...")
     
     try:
         from src.core.character import Character
-        from src.core.dspy.dialogue_manager_dspy import DialogueManagerDSPy
+        from src.core.dspy.optimized_dialogue_manager import OptimizedDialogueManagerDSPy
         
         # 創建測試角色
         print("\n1. 創建測試角色:")
@@ -27,46 +27,39 @@ def test_dialogue_manager_dspy_creation():
         )
         print("  ✅ 測試角色創建成功")
         
-        # 創建 DSPy 對話管理器
-        print("\n2. 創建 DSPy 對話管理器:")
-        manager = DialogueManagerDSPy(
+        # 創建 Optimized DSPy 對話管理器
+        print("\n2. 創建 Optimized DSPy 對話管理器:")
+        manager = OptimizedDialogueManagerDSPy(
             character=test_character,
             use_terminal=False,
             log_dir="logs/test"
         )
-        print("  ✅ DSPy 對話管理器創建成功")
+        print("  ✅ Optimized DSPy 對話管理器創建成功")
         
         # 檢查基本屬性
         print("\n3. 檢查管理器屬性:")
         assert hasattr(manager, 'character'), "缺少 character 屬性"
         assert hasattr(manager, 'current_state'), "缺少 current_state 屬性"
         assert hasattr(manager, 'conversation_history'), "缺少 conversation_history 屬性"
-        assert hasattr(manager, 'dspy_enabled'), "缺少 dspy_enabled 屬性"
+        assert hasattr(manager, 'optimization_enabled'), "缺少 optimization_enabled 屬性"
         print("  ✅ 基本屬性存在")
         
-        # 檢查 DSPy 特定功能
-        print("\n4. 檢查 DSPy 特定功能:")
-        stats = manager.get_dspy_statistics()
+        # 檢查 optimized 特定功能
+        print("\n4. 檢查 optimized 特定功能:")
+        stats = manager.get_optimization_statistics()
         assert isinstance(stats, dict), "統計結果應該是字典"
-        assert 'total_calls' in stats, "統計中應包含 total_calls"
-        print(f"  ✅ DSPy 統計功能正常，DSPy 啟用: {manager.dspy_enabled}")
-        
-        # 測試統計重置
-        print("\n5. 測試統計重置:")
-        manager.reset_statistics()
-        stats_after_reset = manager.get_dspy_statistics()
-        assert stats_after_reset['total_calls'] == 0, "重置後調用次數應為 0"
-        print("  ✅ 統計重置功能正常")
+        assert 'total_conversations' in stats, "統計中應包含 total_conversations"
+        print(f"  ✅ optimized 統計功能正常，啟用: {manager.optimization_enabled}")
         
         # 清理
-        print("\n6. 清理資源:")
+        print("\n5. 清理資源:")
         manager.cleanup()
         print("  ✅ 資源清理完成")
         
         return True
         
     except Exception as e:
-        print(f"❌ DSPy 對話管理器測試失敗: {e}")
+        print(f"❌ Optimized DSPy 對話管理器測試失敗: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -97,24 +90,14 @@ def test_dialogue_factory():
         print("\n2. 查詢可用實現:")
         implementations = get_available_implementations()
         assert isinstance(implementations, dict), "實現列表應該是字典"
-        assert "original" in implementations, "應該包含原始實現"
+        assert "optimized" in implementations, "應該包含 optimized 實現"
         print(f"  可用實現: {list(implementations.keys())}")
         
         for impl_name, impl_info in implementations.items():
             print(f"    {impl_name}: {'✅' if impl_info['available'] else '❌'} {impl_info['description']}")
         
-        # 測試強制創建原始實現
-        print("\n3. 測試強制創建原始實現:")
-        original_manager = create_dialogue_manager(
-            character=test_character,
-            force_implementation="original"
-        )
-        assert original_manager.__class__.__name__ == "DialogueManager", "應該創建原始實現"
-        print("  ✅ 原始實現創建成功")
-        original_manager.cleanup() if hasattr(original_manager, 'cleanup') else None
-        
-        # 測試自動選擇（根據配置）
-        print("\n4. 測試自動選擇:")
+        # 測試自動選擇
+        print("\n3. 測試自動選擇:")
         auto_manager = create_dialogue_manager(
             character=test_character
         )
@@ -122,22 +105,8 @@ def test_dialogue_factory():
         print("  ✅ 自動選擇功能正常")
         auto_manager.cleanup() if hasattr(auto_manager, 'cleanup') else None
         
-        # 測試 DSPy 實現（如果可用）
-        if "dspy" in implementations and implementations["dspy"]["available"]:
-            print("\n5. 測試 DSPy 實現:")
-            try:
-                dspy_manager = create_dialogue_manager(
-                    character=test_character,
-                    force_implementation="dspy"
-                )
-                assert dspy_manager.__class__.__name__ == "DialogueManagerDSPy", "應該創建 DSPy 實現"
-                print("  ✅ DSPy 實現創建成功")
-                dspy_manager.cleanup()
-            except Exception as e:
-                print(f"  ⚠️ DSPy 實現測試跳過: {e}")
-        
         # 測試實現測試函數
-        print("\n6. 測試實現測試函數:")
+        print("\n4. 測試實現測試函數:")
         test_results = test_implementations()
         assert isinstance(test_results, dict), "測試結果應該是字典"
         
@@ -169,15 +138,7 @@ def test_interface_compatibility():
             goal="驗證接口兼容性"
         )
         
-        # 測試兩種實現的接口
-        implementations = ["original"]
-        
-        # 如果 DSPy 可用，也測試它
-        try:
-            from src.core.dspy.dialogue_manager_dspy import DialogueManagerDSPy
-            implementations.append("dspy")
-        except ImportError:
-            print("  DSPy 實現不可用，跳過")
+        implementations = ["optimized"]
         
         for impl_name in implementations:
             print(f"\n  測試 {impl_name} 實現接口:")
@@ -243,21 +204,14 @@ def test_configuration_switching():
     print("\n⚙️ 測試配置切換...")
     
     try:
+        # legacy 的 dspy enabled/disable 切換已不再影響實作選擇（factory 固定 optimized）。
         from src.core.dspy.config import DSPyConfig
-        
-        # 測試配置讀取
-        print("\n1. 測試配置讀取:")
+
+        print("\n1. 測試 DSPyConfig 可正常讀取:")
         config = DSPyConfig()
-        dspy_enabled = config.is_dspy_enabled()
-        print(f"  當前 DSPy 配置狀態: {dspy_enabled}")
-        print("  ✅ 配置讀取正常")
-        
-        # 測試配置信息
-        print("\n2. 測試配置信息:")
         dspy_config = config.get_dspy_config()
         assert isinstance(dspy_config, dict), "DSPy 配置應該是字典"
-        print(f"  DSPy 配置項數量: {len(dspy_config)}")
-        print("  ✅ 配置信息正常")
+        print("  ✅ 配置讀取正常（僅作為參數來源）")
         
         return True
         

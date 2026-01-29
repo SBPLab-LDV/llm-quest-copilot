@@ -9,6 +9,11 @@ DSPy 真實 Gemini LLM 整合測試
 import sys
 sys.path.insert(0, '/app')
 
+# NOTE: This file is a manual integration script and is not meant to run in CI.
+# The project has removed the legacy/original implementation and runs optimized DSPy only.
+import pytest
+pytest.skip("manual integration test (legacy/original removed; optimized-only)", allow_module_level=True)
+
 import asyncio
 import json
 from typing import Dict, Any
