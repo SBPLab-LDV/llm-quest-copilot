@@ -66,7 +66,6 @@ class GeminiClient:
         self.multimodal_model = genai.GenerativeModel(self.model_name)
         self.logging_cfg = config.get('logging', {}) or {}
         self.audio_cfg = config.get('audio', {}) or {}
-        self._prompt_manager = None
         self._last_audio_prompt: Optional[str] = None
         self._last_audio_system_prompt: Optional[str] = None
         self._last_audio_user_prompt: Optional[str] = None
@@ -209,14 +208,16 @@ class GeminiClient:
                 })
 
             option_count = int(self.audio_cfg.get('option_count', 4) or 4)
-            prompt_via_dspy = bool(self.audio_cfg.get('prompt_via_dspy', False))
             use_context = bool(self.audio_cfg.get('use_context', False))
             template_variant = str(self.audio_cfg.get("template_variant", "full")).lower()
+            prompt_via_dspy_raw = self.audio_cfg.get('prompt_via_dspy', True)
+            if prompt_via_dspy_raw is False:
+                raise RuntimeError("Legacy audio prompt is removed; set audio.prompt_via_dspy=true.")
 
             # Diagnostics: log audio configuration
             self.logger.info(
                 "[AudioCfg] prompt_via_dspy=%s, use_context=%s, option_count=%s",
-                prompt_via_dspy, use_context, option_count,
+                True, use_context, option_count,
             )
 
             character_profile = summarize_character(character) if character else ""
@@ -238,101 +239,68 @@ class GeminiClient:
             self._last_trace_id = trace_id
             self._last_audio_template_rules = template_rules
 
-            if prompt_via_dspy:
-                template_path = None
-                template_path_raw = self.audio_cfg.get("template_path")
-                if template_path_raw:
-                    template_path = Path(str(template_path_raw))
-                else:
-                    if template_variant in {"compact", "short", "lite"}:
-                        template_path = Path("prompts/templates/audio_disfluency_template_compact.yaml")
-                composer = get_audio_prompt_composer(template_path=template_path)
-                # Diagnostics: record and log signature/inputs presence
-                sig_name = None
-                try:
-                    sig_name = getattr(composer, 'signature').__name__  # type: ignore[attr-defined]
-                except Exception:
-                    sig_name = str(getattr(composer, 'signature', 'unknown'))
-                self._last_audio_used_dspy = True
-                self._last_audio_signature = sig_name
-                self.logger.info(
-                    "[DSPy] Using AudioPromptComposerModule (Signature=%s, template=%s) | profile_len=%s, history_len=%s, contexts_len=%s, rules_len=%s",
-                    sig_name,
-                    template_path.name if template_path else "default",
-                    len(character_profile or ""),
-                    len(history_text or ""),
-                    len(available_contexts or ""),
-                    len(template_rules or ""),
-                )
-                prediction = composer(
-                    character_profile=character_profile,
-                    conversation_history=history_text,
-                    available_contexts=available_contexts,
-                    template_rules=template_rules,
-                    option_count=option_count,
-                )
-                system_prompt = getattr(prediction, 'system_prompt', '')
-                user_prompt = getattr(prediction, 'user_prompt', '')
-                self.logger.info(
-                    "[DSPy] Composer output lengths | system=%s chars, user=%s chars",
-                    len(system_prompt or ""), len(user_prompt or "")
-                )
-                combined_prompt = "\n\n".join([p for p in [system_prompt, user_prompt] if p]).strip()
-                self._last_audio_system_prompt = system_prompt
-                self._last_audio_user_prompt = user_prompt
-                self._last_audio_prompt = combined_prompt
-                if self.logging_cfg.get('llm_raw', False):
-                    max_len = int(self.logging_cfg.get('max_chars', 8000))
-                    prefix = ''
-                    if session_id or trace_id:
-                        prefix = f"[session={session_id or ''} trace={trace_id or ''}] "
-                    self.logger.info(f"{prefix}LM IN (audio/system): {system_prompt[:max_len]}")
-                    self.logger.info(f"{prefix}LM IN (audio/user): {user_prompt[:max_len]}")
-                mime_type = self._infer_mime_type(audio_file_path)
-                content = {
-                    "parts": [
-                        {"text": system_prompt},
-                        {"text": user_prompt},
-                        {
-                            "inline_data": {
-                                "mime_type": mime_type,
-                                "data": base64.b64encode(audio_data).decode('utf-8')
-                            }
-                        }
-                    ]
-                }
+            template_path = None
+            template_path_raw = self.audio_cfg.get("template_path")
+            if template_path_raw:
+                template_path = Path(str(template_path_raw))
             else:
-                self._last_audio_used_dspy = False
-                self._last_audio_signature = None
-                self.logger.info("[DSPy] Skipped (prompt_via_dspy=false). Using legacy PromptManager audio prompt.")
-                if self._prompt_manager is None:
-                    from ..core.prompt_manager import PromptManager
-                    self._prompt_manager = PromptManager()
-                legacy_prompt = self._prompt_manager.get_audio_prompt(
-                    character if use_context else None,
-                    conversation_history if use_context else None,
-                )
-                self._last_audio_prompt = legacy_prompt
-                self._last_audio_system_prompt = legacy_prompt
-                self._last_audio_user_prompt = ""
-                if self.logging_cfg.get('llm_raw', False):
-                    max_len = int(self.logging_cfg.get('max_chars', 8000))
-                    prefix = ''
-                    if session_id or trace_id:
-                        prefix = f"[session={session_id or ''} trace={trace_id or ''}] "
-                    self.logger.info(f"{prefix}LM IN (audio): {legacy_prompt[:max_len]}")
-                mime_type = self._infer_mime_type(audio_file_path)
-                content = {
-                    "parts": [
-                        {"text": legacy_prompt},
-                        {
-                            "inline_data": {
-                                "mime_type": mime_type,
-                                "data": base64.b64encode(audio_data).decode('utf-8')
-                            }
+                if template_variant in {"compact", "short", "lite"}:
+                    template_path = Path("prompts/templates/audio_disfluency_template_compact.yaml")
+            composer = get_audio_prompt_composer(template_path=template_path)
+            # Diagnostics: record and log signature/inputs presence
+            sig_name = None
+            try:
+                sig_name = getattr(composer, 'signature').__name__  # type: ignore[attr-defined]
+            except Exception:
+                sig_name = str(getattr(composer, 'signature', 'unknown'))
+            self._last_audio_used_dspy = True
+            self._last_audio_signature = sig_name
+            self.logger.info(
+                "[DSPy] Using AudioPromptComposerModule (Signature=%s, template=%s) | profile_len=%s, history_len=%s, contexts_len=%s, rules_len=%s",
+                sig_name,
+                template_path.name if template_path else "default",
+                len(character_profile or ""),
+                len(history_text or ""),
+                len(available_contexts or ""),
+                len(template_rules or ""),
+            )
+            prediction = composer(
+                character_profile=character_profile,
+                conversation_history=history_text,
+                available_contexts=available_contexts,
+                template_rules=template_rules,
+                option_count=option_count,
+            )
+            system_prompt = getattr(prediction, 'system_prompt', '')
+            user_prompt = getattr(prediction, 'user_prompt', '')
+            self.logger.info(
+                "[DSPy] Composer output lengths | system=%s chars, user=%s chars",
+                len(system_prompt or ""), len(user_prompt or "")
+            )
+            combined_prompt = "\n\n".join([p for p in [system_prompt, user_prompt] if p]).strip()
+            self._last_audio_system_prompt = system_prompt
+            self._last_audio_user_prompt = user_prompt
+            self._last_audio_prompt = combined_prompt
+            if self.logging_cfg.get('llm_raw', False):
+                max_len = int(self.logging_cfg.get('max_chars', 8000))
+                prefix = ''
+                if session_id or trace_id:
+                    prefix = f"[session={session_id or ''} trace={trace_id or ''}] "
+                self.logger.info(f"{prefix}LM IN (audio/system): {system_prompt[:max_len]}")
+                self.logger.info(f"{prefix}LM IN (audio/user): {user_prompt[:max_len]}")
+            mime_type = self._infer_mime_type(audio_file_path)
+            content = {
+                "parts": [
+                    {"text": system_prompt},
+                    {"text": user_prompt},
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": base64.b64encode(audio_data).decode('utf-8')
                         }
-                    ]
-                }
+                    }
+                ]
+            }
 
             audio_max_tokens = int(self.audio_cfg.get("max_output_tokens", 1024) or 1024)
             generation_config = {

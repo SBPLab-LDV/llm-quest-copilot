@@ -30,7 +30,6 @@ def load_config() -> Dict[str, Any]:
 
     audio_defaults = {
         'use_context': False,
-        'prompt_via_dspy': True,
         'consistency_reorder': False,
         'use_option_selector': False,
         'evaluate_only': False,
