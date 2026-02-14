@@ -5,6 +5,7 @@ import os
 import base64
 import json
 import hashlib
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -79,6 +80,8 @@ class GeminiClient:
         # Self-annotation fields
         self._last_audio_raw_transcript: Optional[str] = None
         self._last_audio_keyword_completion: Optional[list] = None
+        # Timing breakdown
+        self._last_audio_timings: Optional[Dict[str, float]] = None
         
     def _infer_mime_type(self, path: str) -> str:
         try:
@@ -178,6 +181,9 @@ class GeminiClient:
         try:
             self.logger.info("===== 開始音頻轉文本 =====")
             self.logger.info(f"音頻文件: {audio_file_path}")
+            _t_start = time.time()
+            _t_retry_start = _t_retry_end = None
+            self._last_audio_timings = None
 
             if not os.path.exists(audio_file_path):
                 self.logger.error(f"音頻文件不存在: {audio_file_path}")
@@ -186,6 +192,7 @@ class GeminiClient:
                     "options": ["無法處理音頻文件：文件不存在"]
                 })
 
+            _t_audio_read_start = time.time()
             try:
                 with open(audio_file_path, "rb") as f:
                     audio_data = f.read()
@@ -207,6 +214,8 @@ class GeminiClient:
                     "options": ["無法讀取音頻文件"]
                 })
 
+            _t_audio_read_end = time.time()
+            _t_prompt_compose_start = time.time()
             option_count = int(self.audio_cfg.get('option_count', 4) or 4)
             use_context = bool(self.audio_cfg.get('use_context', False))
             template_variant = str(self.audio_cfg.get("template_variant", "full")).lower()
@@ -311,6 +320,8 @@ class GeminiClient:
                 "response_mime_type": "application/json",
             }
 
+            _t_prompt_compose_end = time.time()
+            _t_gemini_api_start = time.time()
             self.logger.info("調用 Gemini 多模態 API 進行音頻識別")
             self.logger.info("音頻識別生成參數: %s", generation_config)
             response = self.multimodal_model.generate_content(
@@ -318,6 +329,8 @@ class GeminiClient:
                 generation_config=generation_config
             )
 
+            _t_gemini_api_end = time.time()
+            _t_json_parse_start = time.time()
             result_text = response.text.strip()
             self._last_audio_raw = result_text
             self.logger.info("===== 音頻識別完成 =====")
@@ -362,6 +375,7 @@ class GeminiClient:
             json_result = _parse_audio_json(result_text)
             if json_result is None:
                 self.logger.warning("音頻 JSON 解析失敗，嘗試重新請求更精簡輸出")
+                self.logger.warning("[Timing][retry_trigger] first parse failed, raw_snippet=%s", result_text[:200])
                 fallback_prompt = (
                     "請直接輸出單一合法 JSON，不要任何 Markdown 或說明文字。\n"
                     "格式如下：\n"
@@ -375,25 +389,22 @@ class GeminiClient:
                     "}\n"
                     "限制：keyword_completion 最多 8 個項目；options 必須恰好 4 句。\n"
                     "若無法識別，輸出：\n"
-                    "{\"raw_transcript\":\"無法識別\",\"keyword_completion\":[],\"original\":\"無法識別\",\"options\":[\"我需要協助重新表達剛才的需求\",\"能否請您幫我重述或慢一點說\",\"我想請對方幫我確認我剛才想表達的事情\",\"我需要協助確認我的需要，謝謝\"]}"
+                    "{\"raw_transcript\":\"無法識別\",\"keyword_completion\":[],\"original\":\"無法識別\",\"options\":[\"我需要協助重新表達剛才的需求\",\"能否請您幫我重述或慢一點說\",\"我想請對方幫我確認我剛才想表達的事情\",\"我需要協助確認我的需要，謝謝\"]}\n\n"
+                    f"以下是上一次模型回傳的原始文字，請據此重新輸出合法 JSON：\n{result_text[:2000]}"
                 )
                 retry_content = {
                     "parts": [
                         {"text": fallback_prompt},
-                        {
-                            "inline_data": {
-                                "mime_type": mime_type,
-                                "data": base64.b64encode(audio_data).decode('utf-8')
-                            }
-                        }
                     ]
                 }
                 retry_config = dict(generation_config)
                 retry_config["temperature"] = 0.2
+                _t_retry_start = time.time()
                 retry_response = self.multimodal_model.generate_content(
                     retry_content,
                     generation_config=retry_config
                 )
+                _t_retry_end = time.time()
                 retry_text = retry_response.text.strip()
                 self.logger.info("===== 音頻識別重試完成 =====")
                 try:
@@ -463,6 +474,20 @@ class GeminiClient:
                     if session_id or trace_id:
                         prefix = f"[session={session_id or ''} trace={trace_id or ''}] "
                     self.logger.info(f"{prefix}LM OUT (audio/clean): {self._last_audio_clean[:max_len]}")
+
+                _t_json_parse_end = time.time()
+                _retry_triggered = _t_retry_start is not None and _t_retry_end is not None
+                self._last_audio_timings = {
+                    "audio_read_s": round(_t_audio_read_end - _t_audio_read_start, 4),
+                    "prompt_compose_s": round(_t_prompt_compose_end - _t_prompt_compose_start, 4),
+                    "gemini_api_call_s": round(_t_gemini_api_end - _t_gemini_api_start, 4),
+                    "json_parse_s": round(_t_json_parse_end - _t_json_parse_start, 4),
+                    "total_s": round(_t_json_parse_end - _t_start, 4),
+                    "retry_triggered": _retry_triggered,
+                }
+                if _retry_triggered:
+                    self._last_audio_timings["gemini_retry_s"] = round(_t_retry_end - _t_retry_start, 4)
+                self.logger.info("[Timing] transcribe_audio: %s", self._last_audio_timings)
                 return self._last_audio_clean
 
             self.logger.error(f"回應不是 JSON 格式: {result_text}")

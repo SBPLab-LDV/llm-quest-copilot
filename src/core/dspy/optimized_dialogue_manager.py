@@ -9,6 +9,7 @@
 import json
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional, Union
 
 from ..dialogue import DialogueManager
@@ -64,6 +65,7 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             'estimated_quota_saved_percent': 0.0
         }
         self._character_profile_emitted = False
+        self._last_turn_timings: Optional[Dict] = None
 
     async def process_turn(self, user_input: str, gui_selected_response: Optional[str] = None) -> Union[str, dict]:
         """處理優化版對話輪次
@@ -119,6 +121,10 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 self.logger.info(f"⚠️ 跳過記錄到對話歷史：{reason}")
             
             # 使用優化的統一對話模組 (僅1次 API 調用)
+            _t_turn_start = time.time()
+            self._last_turn_timings = None
+
+            _t_dialogue_module_start = time.time()
             prediction = self.dialogue_module(
                 user_input=user_input,
                 character_name=self.character.name,
@@ -128,38 +134,57 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                 character_details=self._get_character_details(),
                 conversation_history=self._format_conversation_history()
             )
-            
+            _t_dialogue_module_end = time.time()
+
             self.logger.info(f"優化處理完成:")
             self.logger.info(f"  - API 調用次數: 1 (原本需要 3次)")
             self.logger.info(f"  - 節省配額使用: 66.7%")
             self.logger.info(f"  - 回應數量: {len(prediction.responses)}")
             self.logger.info(f"  - 情境分類: {getattr(prediction, 'context_classification', None)}")
-            
+
             # 更新節省統計
             saved_calls = prediction.processing_info.get('api_calls_saved', 2)
             self.optimization_stats['api_calls_saved'] += saved_calls
             self.optimization_stats['estimated_quota_saved_percent'] = (
-                (self.optimization_stats['api_calls_saved'] / 
+                (self.optimization_stats['api_calls_saved'] /
                  (self.optimization_stats['total_conversations'] * 3)) * 100
                 if self.optimization_stats['total_conversations'] > 0 else 0
             )
-            
+
             # 讓 rewrite 模組決策是否需要改寫（若停用，直接使用基礎預測）
+            _t_sensitive_rewrite_start = time.time()
             rewrite_result = self._attempt_sensitive_rewrite(user_input, prediction)
+            _t_sensitive_rewrite_end = time.time()
+            _sensitive_rewrite_triggered = rewrite_result is not None
+
+            _t_post_processing_start = time.time()
             response_data = rewrite_result if rewrite_result else self._process_optimized_prediction(prediction)
-            
+
             # ====== Phase 1.3: 會話狀態變化追蹤 ======
             round_number = len(self.conversation_history) // 2 + 1  # 估算輪次
             self._track_session_state_changes(user_input, response_data, round_number)
-            
+
             # 更新對話狀態
             self._update_dialogue_state(response_data)
-            
+
             # 處理終端機模式或 GUI 模式
             if self.use_terminal:
-                return self._handle_terminal_mode(user_input, response_data)
+                result = self._handle_terminal_mode(user_input, response_data)
             else:
-                return self._handle_gui_mode(user_input, response_data, gui_selected_response)
+                result = self._handle_gui_mode(user_input, response_data, gui_selected_response)
+            _t_post_processing_end = time.time()
+
+            _t_turn_end = time.time()
+            self._last_turn_timings = {
+                "total_s": round(_t_turn_end - _t_turn_start, 4),
+                "dialogue_module_s": round(_t_dialogue_module_end - _t_dialogue_module_start, 4),
+                "sensitive_rewrite_s": round(_t_sensitive_rewrite_end - _t_sensitive_rewrite_start, 4),
+                "post_processing_s": round(_t_post_processing_end - _t_post_processing_start, 4),
+                "sensitive_rewrite_triggered": _sensitive_rewrite_triggered,
+            }
+            self.logger.info("[Timing] process_turn: %s", self._last_turn_timings)
+
+            return result
                 
         except Exception as e:
             self.logger.error(f"優化版對話處理失敗: {e}")
