@@ -45,7 +45,15 @@ class DialogueManager:
         self.logger = logging.getLogger(__name__)
 
     def _format_conversation_history(self) -> List[str]:
-        return self.conversation_history[-20:]
+        max_entries = 20
+        try:
+            from .dspy.config import get_config
+
+            dspy_cfg = get_config().get_dspy_config()
+            max_entries = int(dspy_cfg.get("max_history_entries", 20) or 20)
+        except Exception:
+            max_entries = 20
+        return self.conversation_history[-max_entries:]
 
     def log_interaction(
         self,

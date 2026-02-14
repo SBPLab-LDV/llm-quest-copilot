@@ -2,6 +2,16 @@
 debug_mode: false
 dspy:
   provider: gemini
+  thinking_budget: 0
+  max_history_entries: 8
+  fewshot:
+    enabled: true
+    bootstrap_enabled: false
+    max_examples: 2
+  fast_mode:
+    enabled: true
+    reasoning_max_chars: 80
+    response_max_chars: 22
   ab_testing:
     enabled: false
     percentage: 50
@@ -9,7 +19,7 @@ dspy:
     enabled: true
     ttl: 3600
   enabled: true
-  max_output_tokens: 768
+  max_output_tokens: 896
   model: gemini-2.5-flash
   optimize: false
   temperature: 0.7

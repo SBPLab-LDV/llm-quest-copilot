@@ -18,6 +18,7 @@ from dspy.adapters.utils import format_field_value
 from dspy.dsp.utils.settings import settings
 
 from .dialogue_module import DSPyDialogueModule
+from .config import get_config
 from ..scenario_manager import get_scenario_manager
 
 logger = logging.getLogger(__name__)
@@ -151,10 +152,20 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
         """
         # 初始化父類，DSPyDialogueModule 只接受 config 參數
         super().__init__(config)
+
+        dspy_cfg = get_config().get_dspy_config()
+        fewshot_cfg = dspy_cfg.get("fewshot", {}) or {}
+        fast_mode_cfg = dspy_cfg.get("fast_mode", {}) or {}
+        self._fewshot_enabled = bool(fewshot_cfg.get("enabled", True))
+        self._fewshot_bootstrap_enabled = bool(fewshot_cfg.get("bootstrap_enabled", False))
+        self._fewshot_max_examples = max(0, int(fewshot_cfg.get("max_examples", 2) or 2))
+        self._fast_mode_enabled = bool(fast_mode_cfg.get("enabled", True))
+        self._fast_reasoning_max_chars = max(40, int(fast_mode_cfg.get("reasoning_max_chars", 80) or 80))
+        self._fast_response_max_chars = max(12, int(fast_mode_cfg.get("response_max_chars", 22) or 22))
         
         # 替換為統一的對話處理器：直接使用 Predict 並強制 JSONAdapter
         self.unified_response_generator = dspy.Predict(UnifiedPatientResponseSignature)
-        self._json_adapter = UnifiedJSONAdapter(JSON_OUTPUT_DIRECTIVE)
+        self._json_adapter = UnifiedJSONAdapter(self._build_json_output_directive())
 
         # 預設規則片段（可被 Optimizer/設定覆蓋）
         # 用語規範：避免職稱稱呼；若不得不提，嚴禁「護士」，一律使用「護理師」。
@@ -216,7 +227,26 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             'last_reset': datetime.now().isoformat()
         }
         
+        logger.info(
+            "UnifiedDSPyDialogueModule latency profile: fast_mode=%s, fewshot_enabled=%s, bootstrap_enabled=%s, fewshot_max=%s, response_max_chars=%s",
+            self._fast_mode_enabled,
+            self._fewshot_enabled,
+            self._fewshot_bootstrap_enabled,
+            self._fewshot_max_examples,
+            self._fast_response_max_chars,
+        )
         logger.info("UnifiedDSPyDialogueModule 初始化完成 - 已優化為單一 API 調用")
+
+    def _build_json_output_directive(self) -> str:
+        directive = JSON_OUTPUT_DIRECTIVE
+        if not self._fast_mode_enabled:
+            return directive
+        return (
+            f"{directive}\n"
+            f"【低延遲輸出】reasoning 必須為單句且不超過 {self._fast_reasoning_max_chars} 字；"
+            f"每個 responses 句子不超過 {self._fast_response_max_chars} 字，避免贅語；"
+            "prior_facts 最多 2 條、每條一個短句。"
+        )
 
     def _load_pain_guide_context(self) -> str:
         """從 pain_assessment_guide.md 載入疼痛評估參考資訊
@@ -323,25 +353,33 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
 
             # 動態載入 few-shot 範例（基於上輪推理的情境）
             fewshot_section = ""
-            if self.scenario_manager:
+            self._fewshot_used = False
+            if self._fewshot_enabled and self.scenario_manager:
                 try:
                     # 第一輪對話：使用 bootstrap examples 確保多角色覆蓋
                     if self._last_context_label is None:
-                        examples = self.scenario_manager.get_bootstrap_examples()
-                        logger.debug(f"📚 第一輪：載入 {len(examples)} 個 bootstrap 範例（多角色覆蓋）")
+                        if self._fewshot_bootstrap_enabled:
+                            examples = self.scenario_manager.get_bootstrap_examples()[:self._fewshot_max_examples]
+                            logger.debug(f"📚 第一輪：載入 {len(examples)} 個 bootstrap 範例（多角色覆蓋）")
+                        else:
+                            examples = []
+                            logger.debug("📚 第一輪：bootstrap few-shot 已停用")
                     else:
                         # 後續輪次：基於上輪情境載入範例
                         examples = self.scenario_manager.get_examples(
                             user_input=user_input,
                             previous_context=self._last_context_label,
-                            max_examples=3
+                            max_examples=self._fewshot_max_examples,
                         )
                         logger.debug(f"📚 後續輪：載入 {len(examples)} 個情境範例 (context={self._last_context_label})")
 
                     if examples:
+                        self._fewshot_used = True
                         fewshot_section = self.scenario_manager.format_examples_for_prompt(examples)
                 except Exception as e:
                     logger.debug(f"Few-shot 載入失敗: {e}")
+            elif not self._fewshot_enabled:
+                logger.debug("📚 few-shot 已由設定停用")
 
             # 疼痛指引注入對話歷史（它是「提醒」性質，屬於 conversation_history）
             # 疼痛指引只在問題涉及疼痛時載入，減少非疼痛問題的 prompt 大小
@@ -371,6 +409,11 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 if self._is_numeric_query(user_input)
                 else self._default_general_response_style_rules
             )
+            if self._fast_mode_enabled:
+                style_rules += (
+                    f"\n【低延遲】responses 請維持短句，單句不超過 {self._fast_response_max_chars} 字，"
+                    "避免重複與冗詞。"
+                )
             persona_rules = self._default_persona_voice_rules
 
             with settings.context(adapter=self._json_adapter):

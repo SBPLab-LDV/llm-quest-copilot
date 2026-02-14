@@ -67,10 +67,22 @@ class DSPyConfig:
                 'enabled': False,
                 'optimize': False,
                 'model': 'gemini-2.0-flash-exp',
-                'temperature': 0.9,
+                'temperature': 0.7,
                 'top_p': 0.8,
                 'top_k': 40,
-                'max_output_tokens': 2048,
+                'max_output_tokens': 896,
+                'thinking_budget': 0,
+                'max_history_entries': 8,
+                'fewshot': {
+                    'enabled': True,
+                    'bootstrap_enabled': False,
+                    'max_examples': 2,
+                },
+                'fast_mode': {
+                    'enabled': True,
+                    'reasoning_max_chars': 80,
+                    'response_max_chars': 22,
+                },
                 'use_unified_module': False,  # 統一對話模組優化
                 'enable_sensitive_rewrite': False,
                 'ollama': {
@@ -135,10 +147,10 @@ class DSPyConfig:
         model_config: Dict[str, Any] = {
             'provider': provider,
             'model': dspy_config.get('model', 'gemini-2.0-flash-exp'),
-            'temperature': dspy_config.get('temperature', 0.9),
+            'temperature': dspy_config.get('temperature', 0.7),
             'top_p': dspy_config.get('top_p', 0.8),
             'top_k': dspy_config.get('top_k', 40),
-            'max_output_tokens': dspy_config.get('max_output_tokens', 2048)
+            'max_output_tokens': dspy_config.get('max_output_tokens', 896)
         }
 
         if provider == 'ollama':
