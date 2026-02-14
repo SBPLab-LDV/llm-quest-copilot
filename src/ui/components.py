@@ -3,6 +3,8 @@ import os
 import logging
 from typing import List, Dict, Any, Optional, Callable
 
+from ..version import __version__, APP_NAME
+
 # 設置日誌記錄
 logging.basicConfig(
     level=logging.DEBUG,
@@ -132,8 +134,8 @@ def create_chat_ui():
     Returns:
         UI 組件集合
     """
-    with gr.Blocks(theme=gr.themes.Soft(), title="醫護對話系統 v0.3.2") as app:
-        gr.Markdown("# 醫護對話系統 v0.3.2")
+    with gr.Blocks(theme=gr.themes.Soft(), title=f"{APP_NAME} v{__version__}") as app:
+        gr.Markdown(f"# {APP_NAME} v{__version__}")
         gr.Markdown("使用此界面與虛擬病患進行對話。您可以選擇不同的角色和回應格式。")
         
         with gr.Row():
