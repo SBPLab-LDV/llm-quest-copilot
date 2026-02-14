@@ -33,7 +33,7 @@ volumes:
 docker compose ps
 
 # 查看 logs
-docker compose logs llm-quest-copilot-dev --tail=50
+docker compose logs app --tail=50
 
 # 只重啟服務（不 rebuild）
 docker restart llm-quest-copilot-dev
