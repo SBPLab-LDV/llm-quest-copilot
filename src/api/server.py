@@ -95,7 +95,7 @@ try:
     with open(CONFIG_FILE_PATH, 'r', encoding='utf-8') as f:
         config_data = yaml.safe_load(f)
     
-    google_api_key_path = config_data.get("google_api_key")
+    google_api_key_path = config_data.get("google_api_key") or os.getenv("GOOGLE_API_KEY")
 
     if google_api_key_path:
         speech_input_handler = SpeechInput(google_api_key=google_api_key_path, debug_mode=config_data.get('debug_mode', False))

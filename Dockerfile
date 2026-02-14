@@ -19,7 +19,6 @@ COPY requirements-ui.txt .
 COPY src/ ./src/
 COPY config/ ./config/
 COPY prompts/ ./prompts/
-COPY run_tests.py .
 COPY recording.wav .
 COPY run_ui.py .
 

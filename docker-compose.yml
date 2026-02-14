@@ -1,0 +1,30 @@
+services:
+  llm-quest-copilot:
+    build: .
+    container_name: llm-quest-copilot
+    restart: always
+    ports:
+      - "8000:8000"   # FastAPI Backend
+      - "7860:7860"   # Gradio Web UI
+    volumes:
+      - ./config:/app/config         # 設定檔（修改後重啟生效）
+      - ./prompts:/app/prompts       # Prompt 模板（修改後重啟生效）
+      - ./src:/app/src               # 原始碼（修改後重啟生效）
+      - ./logs:/app/logs             # 日誌持久化
+      - ./run_ui.py:/app/run_ui.py   # UI 啟動腳本
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/status')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
