@@ -316,18 +316,12 @@ class DialogueApp:
                 # 移除編號前綴
                 if ". " in option_text:
                     option_text = option_text.split(". ", 1)[1]
-                
+
                 logger.info(f"用戶點擊回應按鈕: {option_text}")
-                
-                # 在聊天歷史中，修改現有的上一條消息
-                # 確保虛擬病患的回應顯示在左側（白色框）而非右側（藍色框）
-                if history and len(history) > 0 and history[-1][1] is None:
-                    # 更新最後一個對話的回應部分
-                    history[-1][1] = option_text
-                else:
-                    # 如果沒有待回應的消息，則添加新的病患回應
-                    history = history + [["", option_text]]
-                
+
+                # 添加病患回應到對話歷史（messages 格式）
+                history = history + [{"role": "assistant", "content": option_text}]
+
                 # 發送選擇給伺服器，但不要將其作為新消息處理
                 try:
                     # 只記錄選擇，不要處理返回的回應
@@ -335,7 +329,7 @@ class DialogueApp:
                     # 明確不添加伺服器返回的回應到對話歷史中
                 except Exception as e:
                     logger.error(f"記錄選擇時出錯: {e}")
-                
+
                 # 返回更新後的對話歷史和會話ID，清空選項
                 return history, session_id, []
 
@@ -381,30 +375,27 @@ class DialogueApp:
                     option_index = int(text) - 1
                     selected_option = response_options.value[option_index]
                     logger.info(f"用户选择了选项 {text}: {selected_option}")
-                    
+
                     # 添加选项作为用户输入
-                    history = history + [[selected_option, None]]
-                    
+                    history = history + [{"role": "user", "content": selected_option}]
+
                     # 发送选择到服务器
                     try:
                         response = self.api_client.update_selected_response(self.api_client.session_id, selected_option)
                         if "responses" in response and response["responses"]:
-                            history[-1][1] = response["responses"][0]
+                            history = history + [{"role": "assistant", "content": response["responses"][0]}]
                         if "session_id" in response:
                             sess_id = response["session_id"]
                             self.api_client.session_id = sess_id
                     except Exception as e:
                         logger.error(f"发送选择到服务器时出错: {e}")
-                        history[-1][1] = "处理您的选择时出错。"
-                    
+                        history = history + [{"role": "assistant", "content": "处理您的选择时出错。"}]
+
                     # 清空选项
                     return "", history, sess_id, []
-                
-                # 添加用戶輸入到聊天歷史
-                history = history + [[text, None]]
-                
-                # 直接更新chatbot UI
-                text_chatbot.value = history
+
+                # 添加用戶輸入到聊天歷史（messages 格式）
+                history = history + [{"role": "user", "content": text}]
                 
                 # 準備請求數據
                 request_data = {
@@ -465,21 +456,19 @@ class DialogueApp:
                     if "state" in response and response["state"] == "CONFUSED":
                         # 將 CONFUSED 狀態的回應加上提示
                         confused_response = response["responses"][0]
-                        history[-1][1] = f"{confused_response} (系統暫時無法理解您的問題，請嘗試重新表述)"
-                        text_chatbot.value = history  # 再次更新UI
+                        history = history + [{"role": "assistant", "content": f"{confused_response} (系統暫時無法理解您的問題，請嘗試重新表述)"}]
                         logger.debug("處理 CONFUSED 狀態回應")
                         # 隱藏回應選項
                         return "", history, sess_id, []
                     else:
-                        # 返回所有回應選項，供患者選擇
+                        # 返回所有回應選項，供患者選擇（不添加到 history，等用戶選擇後再加）
                         response_options_list = response["responses"]
                         logger.debug(f"回應選項數量: {len(response_options_list)}")
                         logger.debug(f"顯示回應選項: {response_options_list}")
                         return "", history, sess_id, response_options_list
                 else:
                     # 處理錯誤
-                    history[-1][1] = "發生錯誤，無法獲取回應。"
-                    text_chatbot.value = history  # 更新UI显示错误信息
+                    history = history + [{"role": "assistant", "content": "發生錯誤，無法獲取回應。"}]
                     # 隱藏回應選項
                     return "", history, sess_id, []
             
@@ -531,30 +520,30 @@ class DialogueApp:
                 if sess_id:
                     request_data["session_id"] = sess_id
                 
-                # 添加用戶輸入到聊天歷史
-                history = history + [["[語音輸入]", None]]
-                
+                # 添加用戶輸入到聊天歷史（messages 格式）
+                history = history + [{"role": "user", "content": "[語音輸入]"}]
+
                 # 發送請求
                 response = self.api_client.send_audio(request_data)
                 logger.debug(f"音頻識別回應: {response}")
-                
+
                 # 檢查回應中是否包含語音識別選項
                 if "speech_recognition_options" in response and response["speech_recognition_options"]:
                     # 直接從回應中獲取語音識別選項
                     options = response["speech_recognition_options"]
                     logger.info(f"收到語音識別選項: {options}")
-                    
+
                     # 更新會話 ID
                     if "session_id" in response:
                         sess_id = response["session_id"]
-                        
+
                     # 顯示提示訊息作為對話系統的回應
                     if "responses" in response and response["responses"]:
                         prompt = response["responses"][0]
-                        history[-1][1] = prompt
                     else:
-                        history[-1][1] = "請從以下選項中選擇您想表達的內容:"
-                    
+                        prompt = "請從以下選項中選擇您想表達的內容:"
+                    history = history + [{"role": "assistant", "content": prompt}]
+
                     # 儲存伺服器提供的每會話日誌路徑（若有）
                     try:
                         logs_field = response.get("logs") if isinstance(response, dict) else None
@@ -573,19 +562,16 @@ class DialogueApp:
                         # 更新會話 ID
                         if "session_id" in response:
                             sess_id = response["session_id"]
-                        
+
                         # 檢查是否為 CONFUSED 狀態
                         if "state" in response and response["state"] == "CONFUSED":
-                            # 將 CONFUSED 狀態的回應加上提示
                             confused_response = response["responses"][0]
-                            history[-1][1] = f"{confused_response} (系統暫時無法理解您的問題，請嘗試重新表述)"
+                            history = history + [{"role": "assistant", "content": f"{confused_response} (系統暫時無法理解您的問題，請嘗試重新表述)"}]
                         else:
-                            # 正常回應
-                            history[-1][1] = response["responses"][0]
+                            history = history + [{"role": "assistant", "content": response["responses"][0]}]
                     else:
-                        # 處理錯誤
-                        history[-1][1] = "發生錯誤，無法獲取回應。"
-                    
+                        history = history + [{"role": "assistant", "content": "發生錯誤，無法獲取回應。"}]
+
                     # 儲存伺服器提供的每會話日誌路徑（若有）
                     try:
                         logs_field = response.get("logs") if isinstance(response, dict) else None
@@ -605,27 +591,26 @@ class DialogueApp:
                 # 移除編號前綴
                 if ". " in option_text:
                     option_text = option_text.split(". ", 1)[1]
-                
+
                 logger.info(f"用戶選擇了語音選項: {option_text}")
-                
-                # 添加用戶選擇到對話歷史
-                history = history + [[option_text, None]]
-                
+
+                # 添加用戶選擇到對話歷史（messages 格式）
+                history = history + [{"role": "user", "content": option_text}]
+
                 # 發送選擇給伺服器
                 try:
                     response = self.api_client.update_selected_response(session_id, option_text)
-                    
+
                     if response and "responses" in response and response["responses"]:
-                        # 添加回應
-                        history[-1][1] = response["responses"][0]
-                        
+                        history = history + [{"role": "assistant", "content": response["responses"][0]}]
+
                     # 更新會話ID
                     if response and "session_id" in response:
                         session_id = response["session_id"]
                 except Exception as e:
                     logger.error(f"處理選擇時出錯: {e}")
-                    history[-1][1] = "處理您的選擇時出錯。"
-                
+                    history = history + [{"role": "assistant", "content": "處理您的選擇時出錯。"}]
+
                 # 返回更新後的對話歷史和會話ID，清空選項
                 return history, session_id, []
                 
