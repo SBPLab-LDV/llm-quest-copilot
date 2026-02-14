@@ -1,6 +1,9 @@
 # 設定檔
 config.yaml
 
+# Docker environment-specific override (not tracked)
+docker-compose.override.yml
+
 # Python
 __pycache__/
 *.py[cod]

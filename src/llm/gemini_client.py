@@ -77,7 +77,10 @@ class GeminiClient:
         self._last_audio_raw_transcript: Optional[str] = None
         self._last_audio_keyword_completion: Optional[list] = None
         # Timing breakdown
-        self._last_audio_timings: Optional[Dict[str, float]] = None
+        self._last_audio_timings: Optional[Dict[str, Any]] = None
+        self._last_audio_finish_reason: Optional[str] = None
+        self._last_audio_retry_finish_reason: Optional[str] = None
+        self._last_audio_parse_mode: Optional[str] = None
         
     def _infer_mime_type(self, path: str) -> str:
         try:
@@ -110,7 +113,7 @@ class GeminiClient:
 
             # thinking_budget for dialogue (from dspy config)
             dspy_cfg = load_config().get('dspy', {}) or {}
-            thinking_budget = int(dspy_cfg.get('thinking_budget', 1024))
+            thinking_budget = int(dspy_cfg.get('thinking_budget', 0))
 
             # 呼叫 API
             response = self._client.models.generate_content(
@@ -146,7 +149,17 @@ class GeminiClient:
                     self.logger.info("Gemini prompt_feedback: %s", prompt_feedback)
             except Exception:
                 self.logger.debug("Failed to read Gemini finish_reason/prompt_feedback", exc_info=True)
-            
+            # 記錄 thinking/output token 使用量
+            usage = getattr(response, "usage_metadata", None)
+            if usage:
+                self.logger.info(
+                    "Gemini usage: thoughts_tokens=%s, candidates_tokens=%s, prompt_tokens=%s, total_tokens=%s",
+                    getattr(usage, 'thoughts_token_count', None),
+                    getattr(usage, 'candidates_token_count', None),
+                    getattr(usage, 'prompt_token_count', None),
+                    getattr(usage, 'total_token_count', None),
+                )
+
             # 紀錄最初和最後的一部分回應
             response_text = response.text.strip()
             self.logger.debug(f"回應前100字符: {response_text[:100]}...")
@@ -178,6 +191,12 @@ class GeminiClient:
             _t_start = time.time()
             _t_retry_start = _t_retry_end = None
             self._last_audio_timings = None
+            self._last_audio_finish_reason = None
+            self._last_audio_retry_finish_reason = None
+            self._last_audio_parse_mode = None
+            _primary_finish_reason: Optional[str] = None
+            _retry_finish_reason: Optional[str] = None
+            _parse_mode = "primary_unparsed"
 
             if not os.path.exists(audio_file_path):
                 self.logger.error(f"音頻文件不存在: {audio_file_path}")
@@ -327,12 +346,24 @@ class GeminiClient:
                 finish_reason = None
                 if candidates:
                     finish_reason = getattr(candidates[0], "finish_reason", None)
+                _primary_finish_reason = str(finish_reason) if finish_reason is not None else None
+                self._last_audio_finish_reason = _primary_finish_reason
                 prompt_feedback = getattr(response, "prompt_feedback", None)
                 self.logger.info("Gemini (audio) finish_reason: %s", finish_reason)
                 if prompt_feedback is not None:
                     self.logger.info("Gemini (audio) prompt_feedback: %s", prompt_feedback)
             except Exception:
                 self.logger.debug("Failed to read Gemini audio finish_reason/prompt_feedback", exc_info=True)
+            # 記錄 thinking/output token 使用量
+            usage = getattr(response, "usage_metadata", None)
+            if usage:
+                self.logger.info(
+                    "Gemini (audio) usage: thoughts_tokens=%s, candidates_tokens=%s, prompt_tokens=%s, total_tokens=%s",
+                    getattr(usage, 'thoughts_token_count', None),
+                    getattr(usage, 'candidates_token_count', None),
+                    getattr(usage, 'prompt_token_count', None),
+                    getattr(usage, 'total_token_count', None),
+                )
             try:
                 if self.logging_cfg.get('llm_raw', False):
                     max_len = int(self.logging_cfg.get('max_chars', 8000))
@@ -361,6 +392,7 @@ class GeminiClient:
                     return None
 
             json_result = _parse_audio_json(result_text)
+            _parse_mode = "primary_json" if json_result is not None else "primary_invalid_json"
             _t_json_parse_end = time.time()
             if json_result is None:
                 self.logger.warning("音頻 JSON 解析失敗，嘗試重新請求更精簡輸出")
@@ -400,9 +432,21 @@ class GeminiClient:
                     finish_reason = None
                     if candidates:
                         finish_reason = getattr(candidates[0], "finish_reason", None)
+                    _retry_finish_reason = str(finish_reason) if finish_reason is not None else None
+                    self._last_audio_retry_finish_reason = _retry_finish_reason
                     self.logger.info("Gemini (audio retry) finish_reason: %s", finish_reason)
                 except Exception:
                     self.logger.debug("Failed to read Gemini audio retry finish_reason", exc_info=True)
+                # 記錄 retry 的 thinking/output token 使用量
+                retry_usage = getattr(retry_response, "usage_metadata", None)
+                if retry_usage:
+                    self.logger.info(
+                        "Gemini (audio retry) usage: thoughts_tokens=%s, candidates_tokens=%s, prompt_tokens=%s, total_tokens=%s",
+                        getattr(retry_usage, 'thoughts_token_count', None),
+                        getattr(retry_usage, 'candidates_token_count', None),
+                        getattr(retry_usage, 'prompt_token_count', None),
+                        getattr(retry_usage, 'total_token_count', None),
+                    )
                 if self.logging_cfg.get('llm_raw', False):
                     max_len = int(self.logging_cfg.get('max_chars', 8000))
                     prefix = ''
@@ -412,7 +456,10 @@ class GeminiClient:
                 json_result = _parse_audio_json(retry_text)
                 if json_result is None:
                     self.logger.error("重試後仍無法解析音頻 JSON")
+                    _parse_mode = "retry_invalid_json"
                     json_result = None
+                else:
+                    _parse_mode = "retry_json"
 
             if json_result is not None:
 
@@ -433,6 +480,7 @@ class GeminiClient:
                     json_result = None
 
                 if json_result is None:
+                    _parse_mode = "field_validation_failed"
                     _t_end = time.time()
                     _retry_triggered = _t_retry_start is not None and _t_retry_end is not None
                     self._last_audio_timings = {
@@ -442,10 +490,15 @@ class GeminiClient:
                         "json_parse_s": round(_t_json_parse_end - _t_json_parse_start, 4),
                         "total_s": round(_t_end - _t_start, 4),
                         "retry_triggered": _retry_triggered,
+                        "text_repair_triggered": _retry_triggered,
+                        "parse_mode": _parse_mode,
+                        "finish_reason": _primary_finish_reason,
+                        "retry_finish_reason": _retry_finish_reason,
                         "error": "field_validation_failed",
                     }
                     if _retry_triggered:
                         self._last_audio_timings["gemini_retry_s"] = round(_t_retry_end - _t_retry_start, 4)
+                    self._last_audio_parse_mode = _parse_mode
                     self.logger.info("[Timing] transcribe_audio (error): %s", self._last_audio_timings)
                     error_result = json.dumps({
                         "error": "格式錯誤：缺少必要欄位",
@@ -486,13 +539,19 @@ class GeminiClient:
                     "json_parse_s": round(_t_json_parse_end - _t_json_parse_start, 4),
                     "total_s": round(_t_end - _t_start, 4),
                     "retry_triggered": _retry_triggered,
+                    "text_repair_triggered": _retry_triggered,
+                    "parse_mode": _parse_mode,
+                    "finish_reason": _primary_finish_reason,
+                    "retry_finish_reason": _retry_finish_reason,
                 }
                 if _retry_triggered:
                     self._last_audio_timings["gemini_retry_s"] = round(_t_retry_end - _t_retry_start, 4)
+                self._last_audio_parse_mode = _parse_mode
                 self.logger.info("[Timing] transcribe_audio: %s", self._last_audio_timings)
                 return self._last_audio_clean
 
             self.logger.error(f"回應不是 JSON 格式: {result_text}")
+            _parse_mode = "json_parse_failed"
             _t_end = time.time()
             _retry_triggered = _t_retry_start is not None and _t_retry_end is not None
             self._last_audio_timings = {
@@ -502,10 +561,15 @@ class GeminiClient:
                 "json_parse_s": round(_t_json_parse_end - _t_json_parse_start, 4),
                 "total_s": round(_t_end - _t_start, 4),
                 "retry_triggered": _retry_triggered,
+                "text_repair_triggered": _retry_triggered,
+                "parse_mode": _parse_mode,
+                "finish_reason": _primary_finish_reason,
+                "retry_finish_reason": _retry_finish_reason,
                 "error": "json_parse_failed",
             }
             if _retry_triggered:
                 self._last_audio_timings["gemini_retry_s"] = round(_t_retry_end - _t_retry_start, 4)
+            self._last_audio_parse_mode = _parse_mode
             self.logger.info("[Timing] transcribe_audio (error): %s", self._last_audio_timings)
             error_result = json.dumps({
                 "error": "JSON 解析錯誤",
