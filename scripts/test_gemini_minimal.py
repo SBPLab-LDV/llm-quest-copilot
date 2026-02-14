@@ -5,6 +5,7 @@ Usage examples:
   python scripts/test_gemini_minimal.py
   python scripts/test_gemini_minimal.py --json --print-response
   python scripts/test_gemini_minimal.py --model gemini-2.5-flash --max-output-tokens 1024
+  python scripts/test_gemini_minimal.py --thinking-budget 0
 """
 
 from __future__ import annotations
@@ -15,7 +16,8 @@ import os
 import sys
 from typing import Any, Dict
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -47,6 +49,7 @@ def main() -> None:
     parser.add_argument("--top-p", type=float, default=None)
     parser.add_argument("--top-k", type=int, default=None)
     parser.add_argument("--max-output-tokens", type=int, default=None)
+    parser.add_argument("--thinking-budget", type=int, default=None, help="Thinking budget tokens (-1 for dynamic, 0 to disable)")
     parser.add_argument("--json", action="store_true", help="Force response_mime_type=application/json")
     parser.add_argument("--print-response", action="store_true", help="Print raw response text")
     args = parser.parse_args()
@@ -56,20 +59,37 @@ def main() -> None:
     if not api_key:
         raise SystemExit("Missing google_api_key in config/config.yaml or GOOGLE_API_KEY env")
 
-    genai.configure(api_key=api_key)
+    client = genai.Client(api_key=api_key)
 
     if args.prompt_file:
         with open(args.prompt_file, "r", encoding="utf-8") as f:
             args.prompt = f.read()
 
     model_name = args.model or cfg.get("dspy", {}).get("model") or "gemini-3-flash-preview"
-    generation_config = build_generation_config(cfg, args)
+    gen_params = build_generation_config(cfg, args)
 
     print(f"Model: {model_name}")
-    print(f"Generation config: {generation_config}")
+    print(f"Generation config: {gen_params}")
 
-    model = genai.GenerativeModel(model_name)
-    response = model.generate_content(args.prompt, generation_config=generation_config)
+    # Build config
+    config_kwargs: Dict[str, Any] = {
+        "temperature": gen_params["temperature"],
+        "top_p": gen_params["top_p"],
+        "top_k": gen_params["top_k"],
+        "max_output_tokens": gen_params["max_output_tokens"],
+    }
+    if gen_params.get("response_mime_type"):
+        config_kwargs["response_mime_type"] = gen_params["response_mime_type"]
+
+    if args.thinking_budget is not None:
+        config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=args.thinking_budget)
+        print(f"Thinking budget: {args.thinking_budget}")
+
+    response = client.models.generate_content(
+        model=model_name,
+        contents=args.prompt,
+        config=types.GenerateContentConfig(**config_kwargs),
+    )
 
     text = getattr(response, "text", "")
     candidates = getattr(response, "candidates", None) or []
@@ -79,6 +99,13 @@ def main() -> None:
 
     print(f"Finish reason: {finish_reason}")
     print(f"Response length: {len(text)}")
+
+    # Print usage metadata if available
+    usage = getattr(response, "usage_metadata", None)
+    if usage:
+        print(f"Thoughts tokens: {getattr(usage, 'thoughts_token_count', 'N/A')}")
+        print(f"Candidates tokens: {getattr(usage, 'candidates_token_count', 'N/A')}")
+        print(f"Prompt tokens: {getattr(usage, 'prompt_token_count', 'N/A')}")
 
     if args.print_response:
         print("Raw response:")

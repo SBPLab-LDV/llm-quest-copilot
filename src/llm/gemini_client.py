@@ -1,10 +1,11 @@
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from ..utils.config import load_config
 import logging
 import os
-import base64
 import json
 import hashlib
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -30,7 +31,7 @@ class GeminiClient:
 
         # API key
         effective_api_key = api_key or config.get("google_api_key")
-        genai.configure(api_key=effective_api_key)
+        self._client = genai.Client(api_key=effective_api_key)
 
         # Model name
         # Safety: if the user hasn't opted into the new `llm:` schema, keep the
@@ -60,10 +61,6 @@ class GeminiClient:
             if isinstance(llm_generation, dict):
                 merged.update({k: v for k, v in llm_generation.items() if v is not None})
             self.generation_config = merged
-
-        self.model = genai.GenerativeModel(self.model_name)
-        # Create a multimodal model instance for audio processing
-        self.multimodal_model = genai.GenerativeModel(self.model_name)
         self.logging_cfg = config.get('logging', {}) or {}
         self.audio_cfg = config.get('audio', {}) or {}
         self._last_audio_prompt: Optional[str] = None
@@ -79,6 +76,8 @@ class GeminiClient:
         # Self-annotation fields
         self._last_audio_raw_transcript: Optional[str] = None
         self._last_audio_keyword_completion: Optional[list] = None
+        # Timing breakdown
+        self._last_audio_timings: Optional[Dict[str, float]] = None
         
     def _infer_mime_type(self, path: str) -> str:
         try:
@@ -108,31 +107,29 @@ class GeminiClient:
             # 設定生成參數以確保更好的格式控制
             generation_config = dict(self.generation_config)
             self.logger.info("生成參數: %s", generation_config)
-            
-            safety_settings = [
-                {
-                    "category": "HARM_CATEGORY_HARASSMENT",
-                    "threshold": "BLOCK_NONE"
-                },
-                {
-                    "category": "HARM_CATEGORY_HATE_SPEECH",
-                    "threshold": "BLOCK_NONE"
-                },
-                {
-                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                    "threshold": "BLOCK_NONE"
-                },
-                {
-                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                    "threshold": "BLOCK_NONE"
-                },
-            ]
-            
+
+            # thinking_budget for dialogue (from dspy config)
+            dspy_cfg = load_config().get('dspy', {}) or {}
+            thinking_budget = int(dspy_cfg.get('thinking_budget', 1024))
+
             # 呼叫 API
-            response = self.model.generate_content(
-                prompt,
-                generation_config=generation_config,
-                safety_settings=safety_settings
+            response = self._client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=generation_config.get("temperature"),
+                    top_p=generation_config.get("top_p"),
+                    top_k=generation_config.get("top_k"),
+                    max_output_tokens=generation_config.get("max_output_tokens"),
+                    response_mime_type=generation_config.get("response_mime_type"),
+                    safety_settings=[
+                        types.SafetySetting(category='HARM_CATEGORY_HARASSMENT', threshold='BLOCK_NONE'),
+                        types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
+                        types.SafetySetting(category='HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold='BLOCK_NONE'),
+                        types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
+                    ],
+                    thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
+                ),
             )
             
             # 記錄 API 回傳的結果
@@ -178,6 +175,9 @@ class GeminiClient:
         try:
             self.logger.info("===== 開始音頻轉文本 =====")
             self.logger.info(f"音頻文件: {audio_file_path}")
+            _t_start = time.time()
+            _t_retry_start = _t_retry_end = None
+            self._last_audio_timings = None
 
             if not os.path.exists(audio_file_path):
                 self.logger.error(f"音頻文件不存在: {audio_file_path}")
@@ -186,6 +186,7 @@ class GeminiClient:
                     "options": ["無法處理音頻文件：文件不存在"]
                 })
 
+            _t_audio_read_start = time.time()
             try:
                 with open(audio_file_path, "rb") as f:
                     audio_data = f.read()
@@ -207,6 +208,8 @@ class GeminiClient:
                     "options": ["無法讀取音頻文件"]
                 })
 
+            _t_audio_read_end = time.time()
+            _t_prompt_compose_start = time.time()
             option_count = int(self.audio_cfg.get('option_count', 4) or 4)
             use_context = bool(self.audio_cfg.get('use_context', False))
             template_variant = str(self.audio_cfg.get("template_variant", "full")).lower()
@@ -289,35 +292,33 @@ class GeminiClient:
                 self.logger.info(f"{prefix}LM IN (audio/system): {system_prompt[:max_len]}")
                 self.logger.info(f"{prefix}LM IN (audio/user): {user_prompt[:max_len]}")
             mime_type = self._infer_mime_type(audio_file_path)
-            content = {
-                "parts": [
-                    {"text": system_prompt},
-                    {"text": user_prompt},
-                    {
-                        "inline_data": {
-                            "mime_type": mime_type,
-                            "data": base64.b64encode(audio_data).decode('utf-8')
-                        }
-                    }
-                ]
-            }
 
             audio_max_tokens = int(self.audio_cfg.get("max_output_tokens", 1024) or 1024)
-            generation_config = {
-                "temperature": 0.3,
-                "top_p": 0.95,
-                "top_k": 40,
-                "max_output_tokens": audio_max_tokens,
-                "response_mime_type": "application/json",
-            }
+            audio_thinking_budget = int(self.audio_cfg.get('thinking_budget', 0))
 
+            _t_prompt_compose_end = time.time()
+            _t_gemini_api_start = time.time()
             self.logger.info("調用 Gemini 多模態 API 進行音頻識別")
-            self.logger.info("音頻識別生成參數: %s", generation_config)
-            response = self.multimodal_model.generate_content(
-                content,
-                generation_config=generation_config
+            self.logger.info("音頻識別參數: max_output_tokens=%s, thinking_budget=%s", audio_max_tokens, audio_thinking_budget)
+            response = self._client.models.generate_content(
+                model=self.model_name,
+                contents=[
+                    system_prompt,
+                    user_prompt,
+                    types.Part.from_bytes(data=audio_data, mime_type=mime_type),
+                ],
+                config=types.GenerateContentConfig(
+                    temperature=0.3,
+                    top_p=0.95,
+                    top_k=40,
+                    max_output_tokens=audio_max_tokens,
+                    response_mime_type="application/json",
+                    thinking_config=types.ThinkingConfig(thinking_budget=audio_thinking_budget),
+                ),
             )
 
+            _t_gemini_api_end = time.time()
+            _t_json_parse_start = time.time()
             result_text = response.text.strip()
             self._last_audio_raw = result_text
             self.logger.info("===== 音頻識別完成 =====")
@@ -360,8 +361,10 @@ class GeminiClient:
                     return None
 
             json_result = _parse_audio_json(result_text)
+            _t_json_parse_end = time.time()
             if json_result is None:
                 self.logger.warning("音頻 JSON 解析失敗，嘗試重新請求更精簡輸出")
+                self.logger.warning("[Timing][retry_trigger] first parse failed, raw_snippet=%s", result_text[:200])
                 fallback_prompt = (
                     "請直接輸出單一合法 JSON，不要任何 Markdown 或說明文字。\n"
                     "格式如下：\n"
@@ -375,25 +378,21 @@ class GeminiClient:
                     "}\n"
                     "限制：keyword_completion 最多 8 個項目；options 必須恰好 4 句。\n"
                     "若無法識別，輸出：\n"
-                    "{\"raw_transcript\":\"無法識別\",\"keyword_completion\":[],\"original\":\"無法識別\",\"options\":[\"我需要協助重新表達剛才的需求\",\"能否請您幫我重述或慢一點說\",\"我想請對方幫我確認我剛才想表達的事情\",\"我需要協助確認我的需要，謝謝\"]}"
+                    "{\"raw_transcript\":\"無法識別\",\"keyword_completion\":[],\"original\":\"無法識別\",\"options\":[\"我需要協助重新表達剛才的需求\",\"能否請您幫我重述或慢一點說\",\"我想請對方幫我確認我剛才想表達的事情\",\"我需要協助確認我的需要，謝謝\"]}\n\n"
+                    f"以下是上一次模型回傳的原始文字，請據此重新輸出合法 JSON：\n{result_text[:2000]}"
                 )
-                retry_content = {
-                    "parts": [
-                        {"text": fallback_prompt},
-                        {
-                            "inline_data": {
-                                "mime_type": mime_type,
-                                "data": base64.b64encode(audio_data).decode('utf-8')
-                            }
-                        }
-                    ]
-                }
-                retry_config = dict(generation_config)
-                retry_config["temperature"] = 0.2
-                retry_response = self.multimodal_model.generate_content(
-                    retry_content,
-                    generation_config=retry_config
+                _t_retry_start = time.time()
+                retry_response = self._client.models.generate_content(
+                    model=self.model_name,
+                    contents=fallback_prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.2,
+                        max_output_tokens=audio_max_tokens,
+                        response_mime_type="application/json",
+                        thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    ),
                 )
+                _t_retry_end = time.time()
                 retry_text = retry_response.text.strip()
                 self.logger.info("===== 音頻識別重試完成 =====")
                 try:
@@ -434,6 +433,20 @@ class GeminiClient:
                     json_result = None
 
                 if json_result is None:
+                    _t_end = time.time()
+                    _retry_triggered = _t_retry_start is not None and _t_retry_end is not None
+                    self._last_audio_timings = {
+                        "audio_read_s": round(_t_audio_read_end - _t_audio_read_start, 4),
+                        "prompt_compose_s": round(_t_prompt_compose_end - _t_prompt_compose_start, 4),
+                        "gemini_api_call_s": round(_t_gemini_api_end - _t_gemini_api_start, 4),
+                        "json_parse_s": round(_t_json_parse_end - _t_json_parse_start, 4),
+                        "total_s": round(_t_end - _t_start, 4),
+                        "retry_triggered": _retry_triggered,
+                        "error": "field_validation_failed",
+                    }
+                    if _retry_triggered:
+                        self._last_audio_timings["gemini_retry_s"] = round(_t_retry_end - _t_retry_start, 4)
+                    self.logger.info("[Timing] transcribe_audio (error): %s", self._last_audio_timings)
                     error_result = json.dumps({
                         "error": "格式錯誤：缺少必要欄位",
                         "raw_transcript": raw_transcript or "",
@@ -463,9 +476,37 @@ class GeminiClient:
                     if session_id or trace_id:
                         prefix = f"[session={session_id or ''} trace={trace_id or ''}] "
                     self.logger.info(f"{prefix}LM OUT (audio/clean): {self._last_audio_clean[:max_len]}")
+
+                _t_end = time.time()
+                _retry_triggered = _t_retry_start is not None and _t_retry_end is not None
+                self._last_audio_timings = {
+                    "audio_read_s": round(_t_audio_read_end - _t_audio_read_start, 4),
+                    "prompt_compose_s": round(_t_prompt_compose_end - _t_prompt_compose_start, 4),
+                    "gemini_api_call_s": round(_t_gemini_api_end - _t_gemini_api_start, 4),
+                    "json_parse_s": round(_t_json_parse_end - _t_json_parse_start, 4),
+                    "total_s": round(_t_end - _t_start, 4),
+                    "retry_triggered": _retry_triggered,
+                }
+                if _retry_triggered:
+                    self._last_audio_timings["gemini_retry_s"] = round(_t_retry_end - _t_retry_start, 4)
+                self.logger.info("[Timing] transcribe_audio: %s", self._last_audio_timings)
                 return self._last_audio_clean
 
             self.logger.error(f"回應不是 JSON 格式: {result_text}")
+            _t_end = time.time()
+            _retry_triggered = _t_retry_start is not None and _t_retry_end is not None
+            self._last_audio_timings = {
+                "audio_read_s": round(_t_audio_read_end - _t_audio_read_start, 4),
+                "prompt_compose_s": round(_t_prompt_compose_end - _t_prompt_compose_start, 4),
+                "gemini_api_call_s": round(_t_gemini_api_end - _t_gemini_api_start, 4),
+                "json_parse_s": round(_t_json_parse_end - _t_json_parse_start, 4),
+                "total_s": round(_t_end - _t_start, 4),
+                "retry_triggered": _retry_triggered,
+                "error": "json_parse_failed",
+            }
+            if _retry_triggered:
+                self._last_audio_timings["gemini_retry_s"] = round(_t_retry_end - _t_retry_start, 4)
+            self.logger.info("[Timing] transcribe_audio (error): %s", self._last_audio_timings)
             error_result = json.dumps({
                 "error": "JSON 解析錯誤",
                 "raw_transcript": "",

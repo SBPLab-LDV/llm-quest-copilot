@@ -229,11 +229,12 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 - 工作目錄對應: 本地 `/home/sbplab/llm-quest-copilot-main` 對應到容器內 `/app`
 - API Port: 8000（內部）、7860（UI）
 
-#### 測試機（開發測試）
-- Container 名稱: `dialogue-server-jiawei-dspy`
-- 執行方式: `docker exec dialogue-server-jiawei-dspy python /app/<script_name>.py`
-- 工作目錄對應: 本地 `/home/sbplab/jiawei/llm-quest-dspy` 對應到容器內 `/app`
-- API Port: 18000（內部）、17860（UI）
+#### 測試機（開發測試）— dev 分支
+- Container 名稱: `llm-quest-copilot-dev`
+- 執行方式: `docker exec llm-quest-copilot-dev python /app/<script_name>.py`
+- 工作目錄對應: 本地 `/home/sbplab/llm-quest-copilot-dev` 對應到容器內 `/app`
+- API Port: 18000（外部）→ 8000（內部）、17860（外部）→ 7860（UI）
+- Volume Mounts: `src/`、`config/`、`prompts/`、`run_ui.py` 直接掛載，修改後免 rebuild
 
 範例:
 ```bash
@@ -303,10 +304,11 @@ docker exec dialogue-server-jiawei-dspy python /app/<script_name>.py
 ## 開發注意事項
 
 1. **容器依賴**: 所有程式執行都需要 Docker container 環境，因為依賴項都安裝在容器內
-2. **日誌系統**: 使用 Python logging 模組，同時輸出到 console 和檔案
-3. **會話管理**: 支援會話持久性，使用 session_id 維持對話狀態
-4. **角色系統**: 支援動態角色配置，可即時傳入 character_config
-5. **語言**: 專案主要使用繁體中文介面和訊息
+2. **Volume Mount 熱更新**: `src/`、`config/`、`prompts/`、`run_ui.py` 皆透過 Docker volume mount 直接同步到容器內。**修改這些檔案後不需要 `docker compose up --build`**，程式碼變更會即時生效（部分情況可能需要 `docker restart` 重啟服務）。只有修改 `Dockerfile`、`requirements.txt` 等影響映像層的檔案才需要 rebuild。
+3. **日誌系統**: 使用 Python logging 模組，同時輸出到 console 和檔案
+4. **會話管理**: 支援會話持久性，使用 session_id 維持對話狀態
+5. **角色系統**: 支援動態角色配置，可即時傳入 character_config
+6. **語言**: 專案主要使用繁體中文介面和訊息
 
 ## Git 分支與開發流程
 

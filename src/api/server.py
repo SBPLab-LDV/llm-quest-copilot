@@ -465,13 +465,23 @@ async def speech_to_text(
             file_ext = '.wav'  # 默認擴展名
         
         # 保存上傳的文件，使用原始擴展名
+        _t_stt_start = time.time()
+        _t_file_save_start = None
+        _t_file_save_end = None
+        _t_preprocess_start = None
+        _t_preprocess_end = None
+        _t_transcribe_start = None
+        _t_transcribe_end = None
+        _gemini_client_ref = None  # reference to gemini_client for timing extraction
+        _t_file_save_start = time.time()
         original_audio_path = f"temp_audio_{uuid.uuid4()}{file_ext}"
         temp_files.append(original_audio_path)
-        
+
         with open(original_audio_path, "wb") as f:
             content = await audio_file.read()
             f.write(content)
-        
+        _t_file_save_end = time.time()
+
         logger.debug(f"已保存臨時文件: {original_audio_path}")
         
         # 導入音頻處理工具
@@ -491,10 +501,11 @@ async def speech_to_text(
         
         # 對於 WAV 格式，進行預處理以優化識別
         # 對於其他格式，直接使用原始文件
+        _t_preprocess_start = time.time()
         if file_ext == '.wav':
             processed_audio_path = f"processed_audio_{uuid.uuid4()}.wav"
             temp_files.append(processed_audio_path)
-            
+
             processed_audio_path = preprocess_audio(
                 input_file=original_audio_path,
                 output_file=processed_audio_path
@@ -504,6 +515,7 @@ async def speech_to_text(
             # 其他格式直接使用
             logger.debug(f"使用原始音頻文件: {original_audio_path}")
             processed_audio_path = original_audio_path
+        _t_preprocess_end = time.time()
         
         # 使用 GeminiClient 進行語音識別
         try:
@@ -518,11 +530,13 @@ async def speech_to_text(
             history_list = getattr(dialogue_manager, 'conversation_history', None) if (use_ctx and dialogue_manager) else None
 
             gemini_client = GeminiClient()
+            _gemini_client_ref = gemini_client
             logger.info(f"使用 Gemini 進行音頻識別: {processed_audio_path}")
 
             import uuid as _uuid
             trace_id = str(_uuid.uuid4())
 
+            _t_transcribe_start = time.time()
             try:
                 transcription_json = gemini_client.transcribe_audio(
                     processed_audio_path,
@@ -533,6 +547,7 @@ async def speech_to_text(
                 )
             except Exception:
                 transcription_json = gemini_client.transcribe_audio(processed_audio_path)
+            _t_transcribe_end = time.time()
 
             try:
                 result = json.loads(transcription_json)
@@ -547,9 +562,19 @@ async def speech_to_text(
 
                 if not original or original.startswith("無法識別") or original.startswith("音頻識別過程中發生錯誤"):
                     logger.warning(f"音頻識別失敗或沒有識別出有效內容: {original}")
+                    _t_stt_err_end = time.time()
+                    _stt_timings_err = {
+                        "total_s": round(_t_stt_err_end - _t_stt_start, 4),
+                        "file_save_s": round(_t_file_save_end - _t_file_save_start, 4) if _t_file_save_start is not None and _t_file_save_end is not None else None,
+                        "audio_preprocess_s": round(_t_preprocess_end - _t_preprocess_start, 4) if _t_preprocess_start is not None and _t_preprocess_end is not None else None,
+                        "gemini_transcribe_s": round(_t_transcribe_end - _t_transcribe_start, 4) if _t_transcribe_start is not None and _t_transcribe_end is not None else None,
+                        "gemini_sub_timings": getattr(_gemini_client_ref, '_last_audio_timings', None) if _gemini_client_ref else None,
+                    }
+                    logger.info("[Timing] speech_to_text (early-return/empty): %s", _stt_timings_err)
                     return {
                         "original": original,
-                        "options": ["您好，我沒能清楚聽到您的問題。請問您能再說一次嗎？"]
+                        "options": ["您好，我沒能清楚聽到您的問題。請問您能再說一次嗎？"],
+                        "stt_timings": _stt_timings_err,
                     }
 
                 if not options or len(options) < 1:
@@ -583,6 +608,15 @@ async def speech_to_text(
                             norm_error,
                         )
 
+                _t_stt_end = time.time()
+                _stt_timings = {
+                    "total_s": round(_t_stt_end - _t_stt_start, 4),
+                    "file_save_s": round(_t_file_save_end - _t_file_save_start, 4),
+                    "audio_preprocess_s": round(_t_preprocess_end - _t_preprocess_start, 4),
+                    "gemini_transcribe_s": round(_t_transcribe_end - _t_transcribe_start, 4),
+                    "gemini_sub_timings": gemini_client._last_audio_timings,
+                }
+                logger.info("[Timing] speech_to_text: %s", _stt_timings)
                 return {
                     "raw_transcript": raw_transcript,
                     "keyword_completion": keyword_completion,
@@ -591,26 +625,47 @@ async def speech_to_text(
                     "trace_id": trace_id,
                     "character_profile": character_profile,
                     "history_text": history_text,
+                    "stt_timings": _stt_timings,
                 }
 
             except json.JSONDecodeError:
                 logger.error(f"無法解析識別結果 JSON: {transcription_json}")
+                _t_stt_err_end = time.time()
+                _stt_timings_err = {
+                    "total_s": round(_t_stt_err_end - _t_stt_start, 4),
+                    "file_save_s": round(_t_file_save_end - _t_file_save_start, 4) if _t_file_save_start is not None and _t_file_save_end is not None else None,
+                    "audio_preprocess_s": round(_t_preprocess_end - _t_preprocess_start, 4) if _t_preprocess_start is not None and _t_preprocess_end is not None else None,
+                    "gemini_transcribe_s": round(_t_transcribe_end - _t_transcribe_start, 4) if _t_transcribe_start is not None and _t_transcribe_end is not None else None,
+                    "gemini_sub_timings": getattr(_gemini_client_ref, '_last_audio_timings', None) if _gemini_client_ref else None,
+                }
+                logger.info("[Timing] speech_to_text (early-return/json-error): %s", _stt_timings_err)
                 return {
                     "raw_transcript": "",
                     "keyword_completion": [],
                     "original": transcription_json,
                     "options": [transcription_json],
                     "trace_id": trace_id,
+                    "stt_timings": _stt_timings_err,
                 }
 
         except Exception as e:
             logger.error(f"使用 Gemini 進行音頻識別時出錯: {e}", exc_info=True)
+            _t_stt_err_end = time.time()
+            _stt_timings_err = {
+                "total_s": round(_t_stt_err_end - _t_stt_start, 4),
+                "file_save_s": round(_t_file_save_end - _t_file_save_start, 4) if _t_file_save_start is not None and _t_file_save_end is not None else None,
+                "audio_preprocess_s": round(_t_preprocess_end - _t_preprocess_start, 4) if _t_preprocess_start is not None and _t_preprocess_end is not None else None,
+                "gemini_transcribe_s": round(_t_transcribe_end - _t_transcribe_start, 4) if _t_transcribe_start is not None and _t_transcribe_end is not None else None,
+                "gemini_sub_timings": getattr(_gemini_client_ref, '_last_audio_timings', None) if _gemini_client_ref else None,
+            }
+            logger.info("[Timing] speech_to_text (early-return/exception): %s", _stt_timings_err)
             return {
                 "raw_transcript": "",
                 "keyword_completion": [],
                 "original": "識別失敗",
                 "options": ["您好，這是一條測試訊息。目前遇到了語音識別問題，請稍後再試或改用文字輸入。"],
                 "trace_id": trace_id,
+                "stt_timings": _stt_timings_err,
             }
     
     except Exception as e:
@@ -1273,13 +1328,17 @@ async def process_audio_dialogue(
             )
     
     # 語音轉文本（傳入當前會話以便注入角色與歷史）
+    _t_audio_req_start = time.time()
+    _t_stt_start = time.time()
     text_result = await speech_to_text(
         audio_file,
         dialogue_manager=session["dialogue_manager"],
         session_id=session_id,
     )
+    _t_stt_end = time.time()
     logger.debug(f"音頻識別結果: {text_result}")
-    
+
+    _t_resp_prep_start = time.time()
     # 處理返回結果（可能是字典或JSON字符串）
     if isinstance(text_result, dict):
         # 已經是字典，直接使用
@@ -1366,6 +1425,21 @@ async def process_audio_dialogue(
         logs=session.get("logs") if session else None,
     )
 
+    _t_resp_prep_end = time.time()
+    _t_audio_req_end = time.time()
+    _stt_timings = text_dict.get("stt_timings") if isinstance(text_dict, dict) else None
+    _timing_breakdown = {
+        "total_request_s": round(_t_audio_req_end - _t_audio_req_start, 4),
+        "speech_to_text_s": round(_t_stt_end - _t_stt_start, 4),
+        "response_prep_s": round(_t_resp_prep_end - _t_resp_prep_start, 4),
+    }
+    if _stt_timings:
+        _timing_breakdown["stt_detail"] = _stt_timings
+    if response.performance_metrics is None:
+        response.performance_metrics = {}
+    response.performance_metrics["timing_breakdown"] = _timing_breakdown
+    logger.info("[Timing] /api/dialogue/audio: %s", _timing_breakdown)
+
     # 保存語音識別選項到交互日誌（包含 self-annotation 欄位）
     dialogue_manager.log_interaction(
         user_input="[語音輸入]",
@@ -1429,13 +1503,15 @@ async def process_audio_input_dialogue(
         raise HTTPException(status_code=500, detail=f"Session error: {str(e)}")
 
     # 保存音頻到臨時檔
+    _t_req_start = time.time()
+    _t_audio_save_start = time.time()
     temp_audio_file_path: Optional[str] = None
     try:
         # 從文件名獲取擴展名
         file_ext = os.path.splitext(audio_file.filename)[1].lower()
         if not file_ext:
             file_ext = '.wav'  # 默認擴展名
-        
+
         # 使用原始擴展名創建臨時文件
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_audio_file:
             content = await audio_file.read()
@@ -1445,18 +1521,20 @@ async def process_audio_input_dialogue(
     except Exception as e:
         logger.error(f"Failed saving uploaded audio: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"Failed to save audio file: {str(e)}")
+    _t_audio_save_end = time.time()
 
     # Gemini 轉錄
+    _t_transcription_start = time.time()
     try:
         from ..llm.gemini_client import GeminiClient
-        
+
         gemini_client = GeminiClient()
-        
+
         # 嘗試從 session 中獲取上下文以增強識別準確度
         dm = session.get("dialogue_manager") if session else None
         character_obj = getattr(dm, 'character', None) if dm else None
         history_list = getattr(dm, 'conversation_history', None) if dm else None
-        
+
         transcription_json = gemini_client.transcribe_audio(
             temp_audio_file_path,
             character=character_obj,
@@ -1469,7 +1547,7 @@ async def process_audio_input_dialogue(
             transcription = {"original": transcription_json, "options": [transcription_json]}
         options = transcription.get("options") or []
         original_text = transcription.get("original") or (options[0] if options else "")
-        text_input = original_text 
+        text_input = original_text
         if not text_input:
             raise HTTPException(status_code=400, detail="Unable to transcribe audio")
         logger.info(f"Gemini transcription selected text: '{text_input}' (options={len(options)})")
@@ -1478,6 +1556,7 @@ async def process_audio_input_dialogue(
     except Exception as e:
         logger.error(f"Gemini transcription failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Transcription error: {str(e)}")
+    _t_transcription_end = time.time()
 
     # Phase 5: 音頻對話性能監控
     performance_monitor = get_performance_monitor()
@@ -1490,30 +1569,33 @@ async def process_audio_input_dialogue(
     )
     
     # Dialogue processing
+    _t_dialogue_start = time.time()
     try:
         dialogue_manager = session["dialogue_manager"]
         response_json = await dialogue_manager.process_turn(text_input)
-        
+
         # Phase 5: 記錄成功
         performance_metrics = performance_monitor.end_request(
             context=monitoring_context,
             success=True,
             response_length=len(str(response_json))
         )
-        
+
     except Exception as e:
         logger.error(f"Dialogue processing failed: {e}", exc_info=True)
-        
+
         # Phase 5: 記錄失敗
         performance_monitor.end_request(
             context=monitoring_context,
             success=False,
             error_message=str(e)
         )
-        
+
         raise HTTPException(status_code=500, detail=f"Dialogue error: {str(e)}")
+    _t_dialogue_end = time.time()
 
     # 格式化回應
+    _t_formatting_start = time.time()
     try:
         formatted_response = await format_dialogue_response(
             response_json=response_json,
@@ -1527,6 +1609,27 @@ async def process_audio_input_dialogue(
             formatted_response.speech_recognition_options = options
         # 加入原始轉錄文本
         formatted_response.original_transcription = original_text or None
+
+        _t_formatting_end = time.time()
+        _t_req_end = time.time()
+        _timing_breakdown = {
+            "total_request_s": round(_t_req_end - _t_req_start, 4),
+            "audio_save_s": round(_t_audio_save_end - _t_audio_save_start, 4),
+            "transcription_s": round(_t_transcription_end - _t_transcription_start, 4),
+            "dialogue_s": round(_t_dialogue_end - _t_dialogue_start, 4),
+            "formatting_s": round(_t_formatting_end - _t_formatting_start, 4),
+        }
+        _gemini_sub = getattr(gemini_client, '_last_audio_timings', None)
+        if _gemini_sub:
+            _timing_breakdown["transcription_detail"] = _gemini_sub
+        _turn_timings = getattr(dialogue_manager, '_last_turn_timings', None)
+        if _turn_timings:
+            _timing_breakdown["dialogue_detail"] = _turn_timings
+        if formatted_response.performance_metrics is None:
+            formatted_response.performance_metrics = {}
+        formatted_response.performance_metrics["timing_breakdown"] = _timing_breakdown
+        logger.info("[Timing] /api/dialogue/audio_input: %s", _timing_breakdown)
+
         background_tasks.add_task(cleanup_old_sessions, background_tasks)
         return formatted_response
     except Exception as e:

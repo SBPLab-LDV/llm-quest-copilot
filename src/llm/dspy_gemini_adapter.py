@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, Dict, Optional
 
 from .dspy_base_lm import BaseDSPyLM, DSPyResponse, start_dspy_debug_log
@@ -46,6 +47,7 @@ class DSPyGeminiLM(BaseDSPyLM):
                 "response_mime_type": "application/json",
             },
         )
+        self._last_call_timing: Optional[Dict] = None
 
     # ------------------------------------------------------------------
     # Provider hook
@@ -63,7 +65,21 @@ class DSPyGeminiLM(BaseDSPyLM):
             logger.info("Call kwargs: %s", kwargs)
             logger.info("=== END GEMINI PROMPT INPUT ===")
 
+            _t_api_start = time.time()
             response = self.gemini_client.generate_response(prompt)
+            _t_api_end = time.time()
+            _api_duration = round(_t_api_end - _t_api_start, 4)
+
+            self._last_call_timing = {
+                "call_number": self.call_count,
+                "prompt_chars": len(prompt),
+                "response_chars": len(response),
+                "api_duration_s": _api_duration,
+            }
+            logger.info(
+                "[Timing] DSPy->Gemini call #%s: prompt=%s chars, response=%s chars, duration=%.3fs",
+                self.call_count, len(prompt), len(response), _api_duration,
+            )
 
             logger.info("=== GEMINI RESPONSE OUTPUT (Call #%s) ===", self.call_count)
             logger.info("Response length: %s characters", len(response))

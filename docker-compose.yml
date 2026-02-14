@@ -1,11 +1,11 @@
 services:
-  llm-quest-copilot:
+  llm-quest-copilot-dev:
     build: .
-    container_name: llm-quest-copilot
-    restart: always
+    container_name: llm-quest-copilot-dev
+    restart: unless-stopped
     ports:
-      - "8000:8000"   # FastAPI Backend
-      - "7860:7860"   # Gradio Web UI
+      - "18000:8000"   # FastAPI Backend (dev)
+      - "17860:7860"   # Gradio Web UI (dev)
     volumes:
       - ./config:/app/config         # 設定檔（修改後重啟生效）
       - ./prompts:/app/prompts       # Prompt 模板（修改後重啟生效）
