@@ -20,6 +20,7 @@ import yaml
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Body
+from ..version import __version__
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -152,7 +153,7 @@ character_cache: Dict[str, Character] = {}
 app = FastAPI(
     title="對話系統 API",
     description="提供對話系統的 HTTP 接口，接收文本或音頻輸入並返回對話回應",
-    version="1.0.0"
+    version=__version__
 )
 
 # 添加 CORS 中間件以支持跨域請求
