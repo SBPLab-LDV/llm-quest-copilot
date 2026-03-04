@@ -159,10 +159,14 @@ def build_audio_template_rules(option_count: int) -> str:
 
     Keep only output shape + minimal enforcement to lower token usage.
     """
+    if option_count > 0:
+        options_rule = f"'options' 為長度 {option_count} 的完整句子陣列（繁體中文、單句）。"
+    else:
+        options_rule = "'options' 必須為空陣列 []（本次不需要產生選項句子）。"
     return (
         # Output shape
         "請輸出單一合法 JSON（不得使用 markdown），包含 'original' 與 'options'；"
-        f"'options' 為長度 {option_count} 的完整句子陣列（繁體中文、單句）。"
+        f"{options_rule}"
         # Core enforcement
         " 'original' 需保留關鍵詞，對破碎輸入可溫和重建但不得臆造新意；"
         " 若 original 以逗號/頓號分隔多個短語，將每個短語視為一個『意圖』，前若干句需逐一直接對齊各意圖（直述或請求評估），不得以與意圖無關的泛用句取代；"
