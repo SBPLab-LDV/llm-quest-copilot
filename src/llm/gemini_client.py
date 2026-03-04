@@ -183,7 +183,8 @@ class GeminiClient:
                          character: object = None,
                          conversation_history: object = None,
                          session_id: str = None,
-                         trace_id: str = None) -> str:
+                         trace_id: str = None,
+                         option_count: int = None) -> str:
         """將音頻文件轉換為文本，回傳標準 JSON 字串。"""
         try:
             self.logger.info("===== 開始音頻轉文本 =====")
@@ -229,7 +230,10 @@ class GeminiClient:
 
             _t_audio_read_end = time.time()
             _t_prompt_compose_start = time.time()
-            option_count = int(self.audio_cfg.get('option_count', 4) or 4)
+            if option_count is not None:
+                option_count = max(0, int(option_count))
+            else:
+                option_count = int(self.audio_cfg.get('option_count', 4) or 4)
             use_context = bool(self.audio_cfg.get('use_context', False))
             template_variant = str(self.audio_cfg.get("template_variant", "full")).lower()
             prompt_via_dspy_raw = self.audio_cfg.get('prompt_via_dspy', True)
@@ -397,6 +401,20 @@ class GeminiClient:
             if json_result is None:
                 self.logger.warning("音頻 JSON 解析失敗，嘗試重新請求更精簡輸出")
                 self.logger.warning("[Timing][retry_trigger] first parse failed, raw_snippet=%s", result_text[:200])
+                if option_count > 0:
+                    options_example = ", ".join(f"\"句子{i+1}\"" for i in range(option_count))
+                    options_constraint = f"options 必須恰好 {option_count} 句"
+                    fallback_unable = (
+                        "{\"raw_transcript\":\"無法識別\",\"keyword_completion\":[],\"original\":\"無法識別\","
+                        "\"options\":[\"我需要協助重新表達剛才的需求\",\"能否請您幫我重述或慢一點說\","
+                        "\"我想請對方幫我確認我剛才想表達的事情\",\"我需要協助確認我的需要，謝謝\"]}"
+                    )
+                else:
+                    options_example = ""
+                    options_constraint = "options 必須為空陣列 []"
+                    fallback_unable = (
+                        "{\"raw_transcript\":\"無法識別\",\"keyword_completion\":[],\"original\":\"無法識別\",\"options\":[]}"
+                    )
                 fallback_prompt = (
                     "請直接輸出單一合法 JSON，不要任何 Markdown 或說明文字。\n"
                     "格式如下：\n"
@@ -406,11 +424,11 @@ class GeminiClient:
                     "    {\"heard\": \"片段\", \"completed\": \"補全詞\", \"confidence\": \"high/medium/low\", \"reason\": \"\"}\n"
                     "  ],\n"
                     "  \"original\": \"根據補全詞組成的短句\",\n"
-                    f"  \"options\": [\"句子1\", \"句子2\", \"句子3\", \"句子4\"]\n"
+                    f"  \"options\": [{options_example}]\n"
                     "}\n"
-                    "限制：keyword_completion 最多 8 個項目；options 必須恰好 4 句。\n"
+                    f"限制：keyword_completion 最多 8 個項目；{options_constraint}。\n"
                     "若無法識別，輸出：\n"
-                    "{\"raw_transcript\":\"無法識別\",\"keyword_completion\":[],\"original\":\"無法識別\",\"options\":[\"我需要協助重新表達剛才的需求\",\"能否請您幫我重述或慢一點說\",\"我想請對方幫我確認我剛才想表達的事情\",\"我需要協助確認我的需要，謝謝\"]}\n\n"
+                    f"{fallback_unable}\n\n"
                     f"以下是上一次模型回傳的原始文字，請據此重新輸出合法 JSON：\n{result_text[:2000]}"
                 )
                 _t_retry_start = time.time()
@@ -505,7 +523,7 @@ class GeminiClient:
                         "raw_transcript": raw_transcript or "",
                         "keyword_completion": [],
                         "original": "語音識別格式錯誤，請重試",
-                        "options": ["語音識別格式錯誤，請重試"]
+                        "options": [] if option_count == 0 else ["語音識別格式錯誤，請重試"]
                     }, ensure_ascii=False)
                     self._last_audio_clean = error_result
                     return error_result
@@ -576,7 +594,7 @@ class GeminiClient:
                 "raw_transcript": "",
                 "keyword_completion": [],
                 "original": "語音識別格式錯誤，請重試",
-                "options": ["語音識別格式錯誤，請重試"]
+                "options": [] if option_count == 0 else ["語音識別格式錯誤，請重試"]
             }, ensure_ascii=False)
             self._last_audio_clean = error_result
             return error_result

@@ -1540,7 +1540,8 @@ async def process_audio_input_dialogue(
             temp_audio_file_path,
             character=character_obj,
             conversation_history=history_list,
-            session_id=session_id
+            session_id=session_id,
+            option_count=0,
         )
         try:
             transcription = json.loads(transcription_json)

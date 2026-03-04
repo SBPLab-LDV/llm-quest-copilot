@@ -56,7 +56,10 @@ class AudioPromptComposerModule(dspy.Module):
             user_sections.append(f"【可用情境】\n{available_contexts}")
         if template_rules:
             user_sections.append(f"【輸出規則提醒】\n{template_rules}")
-        user_sections.append(f"請依規則輸出 {option_count} 個具體完整句子。")
+        if option_count > 0:
+            user_sections.append(f"請依規則輸出 {option_count} 個具體完整句子。")
+        else:
+            user_sections.append("本次僅需轉錄與關鍵詞補全，options 請輸出空陣列 []。")
         user_prompt = "\n\n".join(section for section in user_sections if section)
 
         return dspy.Prediction(
