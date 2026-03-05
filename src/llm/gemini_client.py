@@ -184,7 +184,8 @@ class GeminiClient:
                          conversation_history: object = None,
                          session_id: str = None,
                          trace_id: str = None,
-                         option_count: int = None) -> str:
+                         option_count: int = None,
+                         transcription_only: bool = False) -> str:
         """將音頻文件轉換為文本，回傳標準 JSON 字串。"""
         try:
             self.logger.info("===== 開始音頻轉文本 =====")
@@ -257,21 +258,26 @@ class GeminiClient:
                     )
                 except Exception:
                     history_text = ""
-            available_contexts = build_available_audio_contexts() if use_context else ""
-            template_rules = build_audio_template_rules(option_count)
-            if template_variant in {"compact", "short", "lite"}:
+
+            if transcription_only:
+                available_contexts = ""
                 template_rules = ""
+                template_path = Path("prompts/templates/audio_transcribe_only_template.yaml")
+            else:
+                available_contexts = build_available_audio_contexts() if use_context else ""
+                template_rules = build_audio_template_rules(option_count)
+                if template_variant in {"compact", "short", "lite"}:
+                    template_rules = ""
+                template_path = None
+                template_path_raw = self.audio_cfg.get("template_path")
+                if template_path_raw:
+                    template_path = Path(str(template_path_raw))
+                else:
+                    if template_variant in {"compact", "short", "lite"}:
+                        template_path = Path("prompts/templates/audio_disfluency_template_compact.yaml")
 
             self._last_trace_id = trace_id
             self._last_audio_template_rules = template_rules
-
-            template_path = None
-            template_path_raw = self.audio_cfg.get("template_path")
-            if template_path_raw:
-                template_path = Path(str(template_path_raw))
-            else:
-                if template_variant in {"compact", "short", "lite"}:
-                    template_path = Path("prompts/templates/audio_disfluency_template_compact.yaml")
             composer = get_audio_prompt_composer(template_path=template_path)
             # Diagnostics: record and log signature/inputs presence
             sig_name = None
@@ -296,6 +302,7 @@ class GeminiClient:
                 available_contexts=available_contexts,
                 template_rules=template_rules,
                 option_count=option_count,
+                transcription_only=transcription_only,
             )
             system_prompt = getattr(prediction, 'system_prompt', '')
             user_prompt = getattr(prediction, 'user_prompt', '')
@@ -317,6 +324,8 @@ class GeminiClient:
             mime_type = self._infer_mime_type(audio_file_path)
 
             audio_max_tokens = int(self.audio_cfg.get("max_output_tokens", 1024) or 1024)
+            if transcription_only:
+                audio_max_tokens = min(audio_max_tokens, 256)
             audio_thinking_budget = int(self.audio_cfg.get('thinking_budget', 0))
 
             _t_prompt_compose_end = time.time()
@@ -401,36 +410,44 @@ class GeminiClient:
             if json_result is None:
                 self.logger.warning("音頻 JSON 解析失敗，嘗試重新請求更精簡輸出")
                 self.logger.warning("[Timing][retry_trigger] first parse failed, raw_snippet=%s", result_text[:200])
-                if option_count > 0:
-                    options_example = ", ".join(f"\"句子{i+1}\"" for i in range(option_count))
-                    options_constraint = f"options 必須恰好 {option_count} 句"
-                    fallback_unable = (
-                        "{\"raw_transcript\":\"無法識別\",\"keyword_completion\":[],\"original\":\"無法識別\","
-                        "\"options\":[\"我需要協助重新表達剛才的需求\",\"能否請您幫我重述或慢一點說\","
-                        "\"我想請對方幫我確認我剛才想表達的事情\",\"我需要協助確認我的需要，謝謝\"]}"
+                if transcription_only:
+                    fallback_prompt = (
+                        "請直接輸出單一合法 JSON，不要任何 Markdown 或說明文字。\n"
+                        "格式：{\"original\": \"轉錄結果\"}\n"
+                        "若無法識別：{\"original\": \"無法識別\"}\n\n"
+                        f"以下是上一次模型回傳的原始文字，請據此重新輸出合法 JSON：\n{result_text[:2000]}"
                     )
                 else:
-                    options_example = ""
-                    options_constraint = "options 必須為空陣列 []"
-                    fallback_unable = (
-                        "{\"raw_transcript\":\"無法識別\",\"keyword_completion\":[],\"original\":\"無法識別\",\"options\":[]}"
+                    if option_count > 0:
+                        options_example = ", ".join(f"\"句子{i+1}\"" for i in range(option_count))
+                        options_constraint = f"options 必須恰好 {option_count} 句"
+                        fallback_unable = (
+                            "{\"raw_transcript\":\"無法識別\",\"keyword_completion\":[],\"original\":\"無法識別\","
+                            "\"options\":[\"我需要協助重新表達剛才的需求\",\"能否請您幫我重述或慢一點說\","
+                            "\"我想請對方幫我確認我剛才想表達的事情\",\"我需要協助確認我的需要，謝謝\"]}"
+                        )
+                    else:
+                        options_example = ""
+                        options_constraint = "options 必須為空陣列 []"
+                        fallback_unable = (
+                            "{\"raw_transcript\":\"無法識別\",\"keyword_completion\":[],\"original\":\"無法識別\",\"options\":[]}"
+                        )
+                    fallback_prompt = (
+                        "請直接輸出單一合法 JSON，不要任何 Markdown 或說明文字。\n"
+                        "格式如下：\n"
+                        "{\n"
+                        f"  \"raw_transcript\": \"完整轉錄，用...分隔，若不清楚寫無法識別\",\n"
+                        "  \"keyword_completion\": [\n"
+                        "    {\"heard\": \"片段\", \"completed\": \"補全詞\", \"confidence\": \"high/medium/low\", \"reason\": \"\"}\n"
+                        "  ],\n"
+                        "  \"original\": \"根據補全詞組成的短句\",\n"
+                        f"  \"options\": [{options_example}]\n"
+                        "}\n"
+                        f"限制：keyword_completion 最多 8 個項目；{options_constraint}。\n"
+                        "若無法識別，輸出：\n"
+                        f"{fallback_unable}\n\n"
+                        f"以下是上一次模型回傳的原始文字，請據此重新輸出合法 JSON：\n{result_text[:2000]}"
                     )
-                fallback_prompt = (
-                    "請直接輸出單一合法 JSON，不要任何 Markdown 或說明文字。\n"
-                    "格式如下：\n"
-                    "{\n"
-                    f"  \"raw_transcript\": \"完整轉錄，用...分隔，若不清楚寫無法識別\",\n"
-                    "  \"keyword_completion\": [\n"
-                    "    {\"heard\": \"片段\", \"completed\": \"補全詞\", \"confidence\": \"high/medium/low\", \"reason\": \"\"}\n"
-                    "  ],\n"
-                    "  \"original\": \"根據補全詞組成的短句\",\n"
-                    f"  \"options\": [{options_example}]\n"
-                    "}\n"
-                    f"限制：keyword_completion 最多 8 個項目；{options_constraint}。\n"
-                    "若無法識別，輸出：\n"
-                    f"{fallback_unable}\n\n"
-                    f"以下是上一次模型回傳的原始文字，請據此重新輸出合法 JSON：\n{result_text[:2000]}"
-                )
                 _t_retry_start = time.time()
                 retry_response = self._client.models.generate_content(
                     model=self.model_name,
@@ -481,21 +498,32 @@ class GeminiClient:
 
             if json_result is not None:
 
-                # 驗證必要欄位（不降級，缺少則返回錯誤）
-                raw_transcript = json_result.get('raw_transcript')
-                keyword_completion = json_result.get('keyword_completion')
+                # 驗證必要欄位
                 original = json_result.get('original')
-                options = json_result.get('options')
 
-                # 嚴格驗證：必須包含 raw_transcript
-                if raw_transcript is None:
-                    self.logger.error("Gemini 返回格式錯誤：缺少 raw_transcript")
-                    json_result = None
+                if transcription_only:
+                    # 純轉錄模式：只需要 original
+                    raw_transcript = None
+                    keyword_completion = None
+                    options = []
+                    if not original:
+                        self.logger.error("Gemini 返回格式錯誤：缺少 original")
+                        json_result = None
+                else:
+                    # 完整模式：需要 raw_transcript + keyword_completion
+                    raw_transcript = json_result.get('raw_transcript')
+                    keyword_completion = json_result.get('keyword_completion')
+                    options = json_result.get('options')
 
-                # 嚴格驗證：必須包含 keyword_completion
-                if json_result is not None and (keyword_completion is None or not isinstance(keyword_completion, list)):
-                    self.logger.error("Gemini 返回格式錯誤：缺少或無效的 keyword_completion")
-                    json_result = None
+                    # 嚴格驗證：必須包含 raw_transcript
+                    if raw_transcript is None:
+                        self.logger.error("Gemini 返回格式錯誤：缺少 raw_transcript")
+                        json_result = None
+
+                    # 嚴格驗證：必須包含 keyword_completion
+                    if json_result is not None and (keyword_completion is None or not isinstance(keyword_completion, list)):
+                        self.logger.error("Gemini 返回格式錯誤：缺少或無效的 keyword_completion")
+                        json_result = None
 
                 if json_result is None:
                     _parse_mode = "field_validation_failed"

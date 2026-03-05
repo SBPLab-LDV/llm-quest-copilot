@@ -43,6 +43,7 @@ class AudioPromptComposerModule(dspy.Module):
         available_contexts: str,
         template_rules: str,
         option_count: int,
+        transcription_only: bool = False,
     ) -> dspy.Prediction:
         system_body = self._load_system_body()
         system_prompt = system_body
@@ -52,14 +53,18 @@ class AudioPromptComposerModule(dspy.Module):
             user_sections.append(f"【角色摘要】\n{character_profile}")
         if conversation_history:
             user_sections.append(f"【近期對話】\n{conversation_history}")
-        if available_contexts:
-            user_sections.append(f"【可用情境】\n{available_contexts}")
-        if template_rules:
-            user_sections.append(f"【輸出規則提醒】\n{template_rules}")
-        if option_count > 0:
-            user_sections.append(f"請依規則輸出 {option_count} 個具體完整句子。")
+
+        if transcription_only:
+            user_sections.append("請僅輸出 {\"original\": \"...\"}，不需要其他欄位。")
         else:
-            user_sections.append("本次僅需轉錄與關鍵詞補全，options 請輸出空陣列 []。")
+            if available_contexts:
+                user_sections.append(f"【可用情境】\n{available_contexts}")
+            if template_rules:
+                user_sections.append(f"【輸出規則提醒】\n{template_rules}")
+            if option_count > 0:
+                user_sections.append(f"請依規則輸出 {option_count} 個具體完整句子。")
+            else:
+                user_sections.append("本次僅需轉錄與關鍵詞補全，options 請輸出空陣列 []。")
         user_prompt = "\n\n".join(section for section in user_sections if section)
 
         return dspy.Prediction(
