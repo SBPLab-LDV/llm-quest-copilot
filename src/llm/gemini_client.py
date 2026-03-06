@@ -112,6 +112,8 @@ class GeminiClient:
             self.logger.info("生成參數: %s", generation_config)
 
             # thinking_budget for dialogue (from dspy config)
+            # NOTE: Gemini 2.5 Flash requires explicit ThinkingConfig; omitting it
+            # causes default thinking that consumes the output token budget.
             dspy_cfg = load_config().get('dspy', {}) or {}
             thinking_budget = int(dspy_cfg.get('thinking_budget', 0))
 
