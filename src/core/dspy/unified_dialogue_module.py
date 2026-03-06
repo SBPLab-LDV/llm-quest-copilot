@@ -24,29 +24,19 @@ from ..scenario_manager import get_scenario_manager
 logger = logging.getLogger(__name__)
 
 JSON_OUTPUT_DIRECTIVE = (
-    "[指示] 僅輸出單一 JSON 物件，包含欄位 reasoning, context_classification, responses, core_question, prior_facts, context_judgement。必須維持合法 JSON 語法，"
-    "所有鍵與值皆用雙引號，禁止輸出 None/null/True/False 或未封閉的字串。不得輸出任何分析或思考步驟，"
-    "請直接輸出 JSON 物件（不要附加除 JSON 以外的文字）。reasoning 請簡短說明如何產生這 4 句回應。"
-    "responses 必須是一個長度為 4 的 JSON 陣列；每個元素為一句簡短、自然、彼此獨立且互斥的完整繁體中文句子，"
-    "且每句都需直接回應 user_input 的核心主題，自然提及相關詞彙，不可偏題或答非所問。"
+    "[指示] 僅輸出單一 JSON 物件，包含欄位 context_classification, responses。"
+    "必須維持合法 JSON 語法，所有鍵與值皆用雙引號。"
+    "responses 必須是長度為 4 的 JSON 陣列；每個元素為一句簡短、自然、彼此獨立且互斥的完整繁體中文句子，"
+    "且每句都需直接回應 user_input 的核心主題，不可偏題或答非所問。"
     "4 句需涵蓋不同的回應取向（例如：肯定、否定、不確定、提供具體但簡短的細節），"
     "禁止同義改寫或重覆語意，需更換不同名詞與動詞以確保差異化。"
     "二元問句和數值問句的詳細規則見 response_style_rules 欄位。"
-    "嚴禁在回覆或生成過程中計算或提及字數；嚴禁描述規則、分析或英文內容；嚴禁在 responses 中包含任何括號描述（如肢體動作、表情或舞台指示），只輸出病患實際說出口的話語；"
-    "嚴禁輸出與當前問題無關的模板句（如客套語、表態語）除非問題明確在問該事項。"
-    "禁止添加 [[ ## field ## ]]、markdown 或任何額外文字，完整輸出後以 } 結束。"
-    "responses 必須為 JSON 陣列（雙引號字串的陣列），不可加整段引號或使用 Python list 表示法（不得使用單引號）。"
-    "必須遵守上方提供的規則欄位（例如 term_usage_rules、response_style_rules、persona_voice_rules）。"
-    "\n\n[欄位定義]\n"
-    "- core_question: 問題核心重述。\n"
-    "- prior_facts: 最多 3 條相關事實（優先引用對話歷史）。\n"
-    "- context_judgement: 包含 premise_check（驗證問題前提）、pain_assessment（疼痛相關時填寫）。\n"
-    "【視角規範】所有回應必須以病患第一人稱表述，禁止醫護視角動詞（詢問/建議/安排/提醒/我們會）。\n"
-    "所有 responses 必須與 context_judgement 的推論一致。\n"
-    "【問題前提驗證】當問題中隱含的前提假設與 character_details 不符時：\n"
-    "- premise_check.match 必須設為 false；\n"
-    "- responses 應以病患視角質疑或澄清錯誤前提，指出實際病歷事實；\n"
-    "- 禁止順著錯誤前提回答，必須先澄清事實。"
+    "嚴禁在 responses 中包含括號描述（肢體動作、表情）或與問題無關的模板句，只輸出病患實際說出口的話語。"
+    "必須遵守上方提供的規則欄位（term_usage_rules、response_style_rules、persona_voice_rules）。"
+    "【視角規範】所有回應必須以病患第一人稱表述，禁止醫護視角動詞（詢問/建議/安排/提醒/我們會）。"
+    "【問題前提驗證】當問題中隱含的前提假設與 character_details 不符時，"
+    "responses 應以病患視角質疑或澄清錯誤前提，禁止順著錯誤前提回答。"
+    "禁止添加 [[ ## field ## ]]、markdown 或任何額外文字。"
 )
 
 PERSONA_REMINDER_TEMPLATE = (
@@ -80,15 +70,10 @@ class UnifiedPatientResponseSignature(dspy.Signature):
     response_style_rules = dspy.InputField(desc="回應風格/多樣性/格式化規範")
     persona_voice_rules = dspy.InputField(desc="病患語氣與知識邊界規則")
 
-    # 輸出欄位（必填）
-    reasoning = dspy.OutputField(desc="推理與一致性檢查")
+    # 輸出欄位
     context_classification = dspy.OutputField(desc="情境分類 ID")
     responses = dspy.OutputField(desc="四個病患回應，嚴禁包含任何括號、動作描述、肢體語言或省略號（...），只輸出流暢完整的純口語句子")
-    # 推薦輸出：便於後處理與審核
-    core_question = dspy.OutputField(desc="對問題核心的簡短重述")
-    prior_facts = dspy.OutputField(desc="最多三條相關事實")
-    context_judgement = dspy.OutputField(desc="情境自由推理與生成方針")
-    # 已移除：character_consistency_check, confidence, meta_summary（僅 debug 用，減少 LLM 輸出 tokens）
+    # 已移除：reasoning, core_question, prior_facts, context_judgement（僅 debug 用，改由 logger 記錄 LLM 原始輸出）
 
 
 
@@ -202,7 +187,6 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
 
         # 追蹤最近一次模型輸出情境，做為下輪提示濾器
         self._last_context_label: Optional[str] = None
-        self._last_pain_assessment: Optional[Dict[str, Any]] = None  # 追蹤疼痛評估結果
         self._fewshot_used = False
 
         # 載入疼痛評估指引（啟動時載入一次，避免重複讀檔）
@@ -243,9 +227,7 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             return directive
         return (
             f"{directive}\n"
-            f"【低延遲輸出】reasoning 必須為單句且不超過 {self._fast_reasoning_max_chars} 字；"
-            f"每個 responses 句子不超過 {self._fast_response_max_chars} 字，避免贅語；"
-            "prior_facts 最多 2 條、每條一個短句。"
+            f"【低延遲輸出】每個 responses 句子不超過 {self._fast_response_max_chars} 字，避免贅語。"
         )
 
     def _load_pain_guide_context(self) -> str:
@@ -452,47 +434,13 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
             except Exception:
                 pass
 
-            # 從 context_judgement 中提取 pain_assessment（用於追蹤和品質監控）
-            try:
-                ctx_judge = getattr(unified_prediction, 'context_judgement', None)
-                if ctx_judge:
-                    if isinstance(ctx_judge, str):
-                        ctx_judge = json.loads(ctx_judge)
-                    if isinstance(ctx_judge, dict):
-                        pain_assessment = ctx_judge.get('pain_assessment')
-                        if pain_assessment:
-                            self._last_pain_assessment = pain_assessment
-                            is_pain = pain_assessment.get('is_pain_related', False)
-                            if is_pain:
-                                logger.debug(f"🩹 Pain assessment: intensity={pain_assessment.get('intensity_hint')}, "
-                                           f"quality={pain_assessment.get('quality_hints')}")
-            except Exception as e:
-                logger.debug(f"Failed to extract context_judgement fields: {e}")
-
-            # Detailed reasoning and fields for inspection
-            try:
-                logger.info("=== UNIFIED REASONING OUTPUT ===")
-                logger.info(f"reasoning: {getattr(unified_prediction, 'reasoning', '')}")
-                logger.info(f"character_consistency_check: {getattr(unified_prediction, 'character_consistency_check', '')}")
-                logger.info(f"context_classification: {getattr(unified_prediction, 'context_classification', '')}")
-                logger.info(f"confidence: {getattr(unified_prediction, 'confidence', '')}")
-                logger.info(f"dialogue_context: {getattr(unified_prediction, 'dialogue_context', '')}")
-                logger.info(f"state_reasoning: {getattr(unified_prediction, 'state_reasoning', '')}")
-                logger.info(f"core_question: {getattr(unified_prediction, 'core_question', '')}")
-                logger.info(f"prior_facts: {getattr(unified_prediction, 'prior_facts', '')}")
-                logger.info(f"context_judgement: {getattr(unified_prediction, 'context_judgement', '')}")
-                logger.info(f"meta_summary: {getattr(unified_prediction, 'meta_summary', '')}")
-                # Show up to first 3 responses for brevity
-                logger.info(f"responses_preview: {_preview}")
-            except Exception:
-                pass
+            # Log LLM raw output fields for debug (no longer OutputFields)
+            logger.info("context_classification: %s", getattr(unified_prediction, 'context_classification', ''))
+            logger.info("responses_preview: %s", _preview)
             
             # 處理回應格式
             responses = self._process_responses(unified_prediction.responses)
 
-            # 簡化：一致性檢查已停用
-            consistency_info = None
-            
             # 更新統計 - 計算節省的 API 調用
             self.unified_stats['api_calls_saved'] += 2  # 原本 3次，現在 1次，節省 2次
             self._update_stats(
@@ -510,18 +458,13 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 responses=responses,
                 state=_state,
                 dialogue_context=_ctx,
-                confidence=getattr(unified_prediction, 'confidence', 1.0),
-                reasoning=getattr(unified_prediction, 'reasoning', ''),
                 context_classification=_class,
-                context_judgement=getattr(unified_prediction, 'context_judgement', None),  # 傳遞 context_judgement 以便提取 inferred_speaker
-                examples_used=0,  # 統一模式下暫不使用範例
+                examples_used=0,
                 processing_info={
                     'unified_call': True,
                     'api_calls_saved': 2,
                     'context_classification': _class,
-                    'state_reasoning': getattr(unified_prediction, 'state_reasoning', 'auto-filled due to missing fields'),
                     'timestamp': datetime.now().isoformat(),
-                    **({'consistency': consistency_info} if consistency_info else {})
                 }
             )
             
@@ -573,8 +516,6 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                         ],
                         state="NORMAL",
                         dialogue_context=str(salvaged.get('dialogue_context') or 'unspecified'),
-                        confidence=float(salvaged.get('confidence') or 0.9),
-                        reasoning=str(salvaged.get('reasoning') or 'salvaged from error'),
                         context_classification=str(salvaged.get('context_classification') or 'unspecified'),
                         examples_used=0,
                         processing_info={
@@ -602,14 +543,11 @@ class UnifiedDSPyDialogueModule(DSPyDialogueModule):
                 responses=neutral_responses,
                 state="NORMAL",
                 dialogue_context="unspecified",
-                confidence=0.9,
-                reasoning="auto-filled due to exception",
                 context_classification="unspecified",
                 examples_used=0,
                 processing_info={
                     'unified_call': True,
                     'api_calls_saved': 2,
-                    'state_reasoning': 'auto-filled due to exception',
                     'timestamp': datetime.now().isoformat(),
                     'fallback_used': True
                 }

@@ -109,14 +109,10 @@ class DSPyGeminiLM(BaseDSPyLM):
             )
 
             error_payload: Dict[str, Any] = {
-                "reasoning": f"Gemini invocation failed: {type(exc).__name__}",
-                "character_consistency_check": "UNKNOWN",
                 "context_classification": "error",
-                "confidence": "0.00",
                 "responses": [f"GeminiError[{type(exc).__name__}]: {exc}"],
                 "state": "ERROR",
                 "dialogue_context": "GEMINI_EXCEPTION",
-                "state_reasoning": "Gemini API raised an exception",
                 "error": {
                     "type": type(exc).__name__,
                     "message": str(exc),
