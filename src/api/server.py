@@ -1649,13 +1649,14 @@ async def process_audio_input_dialogue(
 @app.post("/api/dialogue/select_response")
 async def select_response(request: SelectResponseRequest):
     """處理患者選擇的回應
-    
+
     Args:
         request: 包含會話ID和選擇的回應
-        
+
     Returns:
         成功或失敗的狀態
     """
+    _t_start = time.time()
     logger.debug(f"處理選擇回應請求: session_id={request.session_id}, selected_response='{request.selected_response}'")
     
     # 檢查會話是否存在
@@ -1675,8 +1676,9 @@ async def select_response(request: SelectResponseRequest):
         
         # 檢查對話歷史中的最後一個狀態是否為等待選擇狀態
         # 使用更可靠的檢測方法，檢查會話屬性而非文本匹配
+        _t_speech_detect_start = time.time()
         is_after_speech_recognition = False
-        
+
         # 1. 檢查是否有語音識別標記
         if hasattr(dialogue_manager, 'last_response_state') and dialogue_manager.last_response_state == "WAITING_SELECTION":
             is_after_speech_recognition = True
@@ -1708,6 +1710,8 @@ async def select_response(request: SelectResponseRequest):
                 logger.debug(f"從對話內容檢測到語音識別相關標記: {entry}")
                 break
         
+        _t_speech_detect_end = time.time()
+
         # 記錄到對話歷史
         dialogue_manager.conversation_history.append(f"{dialogue_manager.character.name}: {request.selected_response}")
         
@@ -1732,8 +1736,15 @@ async def select_response(request: SelectResponseRequest):
                 dialogue_manager.last_speech_options = []
             
             # 直接返回成功訊息，不包含回應
+            _t_end = time.time()
+            logger.info("[Timing] /api/dialogue/select_response: %s", {
+                'total_s': round(_t_end - _t_start, 4),
+                'speech_detect_s': round(_t_speech_detect_end - _t_speech_detect_start, 4),
+                'path': 'speech_recognition_skip',
+                'llm_call': False,
+            })
             return {
-                "status": "success", 
+                "status": "success",
                 "message": "語音識別選擇已記錄",
                 "responses": ["已記錄您的選擇"],
                 "state": "NORMAL",
@@ -1754,6 +1765,7 @@ async def select_response(request: SelectResponseRequest):
         # 如果不是語音識別後的選擇，正常處理
         logger.info(f"處理選擇的回應，發送到 Gemini API: {request.selected_response}")
         try:
+            _t_llm_start = time.time()
             response_json = await dialogue_manager.process_turn(request.selected_response)
             
             # Phase 5: 記錄成功
@@ -1776,9 +1788,19 @@ async def select_response(request: SelectResponseRequest):
         logger.debug(f"對話管理器處理結果: {response_json}")
         
         # 構建具有處理結果的回應
+        _t_end = time.time()
+        _turn_timings = getattr(dialogue_manager, '_last_turn_timings', None)
+        logger.info("[Timing] /api/dialogue/select_response: %s", {
+            'total_s': round(_t_end - _t_start, 4),
+            'speech_detect_s': round(_t_speech_detect_end - _t_speech_detect_start, 4),
+            'dialogue_s': round(_t_end - _t_llm_start, 4),
+            'path': 'llm_call',
+            'llm_call': True,
+            'dialogue_detail': _turn_timings,
+        })
         response_dict = json.loads(response_json)
         return {
-            "status": "success", 
+            "status": "success",
             "message": "回應選擇已記錄",
             "responses": response_dict.get("responses", []),
             "state": response_dict.get("state", "NORMAL"),
