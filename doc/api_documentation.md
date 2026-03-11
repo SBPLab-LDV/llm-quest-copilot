@@ -1,6 +1,6 @@
 # Oral Cancer Patient Dialogue System — API Reference
 
-> **Version**: 0.4.0
+> **Version**: 0.5.0
 > **Base URL**: `http://<host>:8000` (container internal) / `http://<host>:18000` (external mapped port)
 > **Content-Type**: `application/json` for text endpoints; `multipart/form-data` for audio endpoints
 > **Authentication**: None required (intended for internal / research use)
@@ -1059,4 +1059,5 @@ async function audioTwoStep(audioFile, characterId) {
 
 | Date | Version | Changes |
 |---|---|---|
+| 2026-03-11 | 0.5.0 | Formalized selection-based context management. `/select_response` now commits only the chosen patient utterance, while `/text`, `/audio_input`, and `/audio` share pending-selection semantics backed by regression coverage. |
 | 2026-03-04 | 0.4.0 | Rewrote documentation from PDF to Markdown. Documented all 15 endpoints including `audio_input`, `select_response`, debug, and monitoring endpoints. Corrected dialogue states, audio format support, and response schema. |

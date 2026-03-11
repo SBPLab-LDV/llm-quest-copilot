@@ -129,7 +129,7 @@ class DialogueResponse(BaseModel):
     dialogue_context: str
     session_id: str
     inferred_speaker_role: Optional[str] = None  # [已棄用] 保留欄位，總是回傳 None
-    speech_recognition_options: Optional[List[str]] = None  # 新增: 語音識別可能的選項
+    speech_recognition_options: Optional[List[str]] = None  # 相容欄位：語音補句/轉錄候選選項
     original_transcription: Optional[str] = None  # 新增: 原始語音轉錄文本
     raw_transcript: Optional[str] = None  # Self-annotation: 原始轉錄片段
     keyword_completion: Optional[List[Dict[str, Any]]] = None  # Self-annotation: 關鍵詞補全
@@ -137,6 +137,12 @@ class DialogueResponse(BaseModel):
     performance_metrics: Optional[Dict[str, Any]] = None  # Phase 5: 性能指標
     processing_info: Optional[Dict[str, Any]] = None  # Unified/consistency摘要（可選）
     logs: Optional[Dict[str, Any]] = None  # 當前會話的日誌路徑（chat_gui / dspy_debug）
+    interaction_mode: Optional[str] = None  # 對外模式標記（response_selection 等）
+    selection_required: Optional[bool] = None  # 是否需要呼叫方再提交選擇
+    selection_kind: Optional[str] = None  # patient_response / patient_utterance_completion
+    pending_turn_id: Optional[str] = None  # 內部待選 turn id（目前僅附加資訊）
+    selection_committed: Optional[bool] = None  # 選擇是否已正式寫入 history
+    committed_response: Optional[str] = None  # 已提交的病患句子
 
 class SelectResponseRequest(BaseModel):
     """選擇回應請求模型"""
@@ -208,6 +214,8 @@ async def get_session_history(session_id: str, token: Optional[str] = None):
         raise HTTPException(status_code=500, detail="Dialogue manager missing in session")
 
     history = list(getattr(dm, "conversation_history", []))
+    structured_history = list(getattr(dm, "structured_history", []))
+    pending_turn = getattr(dm, "pending_turn", None)
     impl = session.get("implementation_version", "unknown")
     log_path = getattr(dm, "log_filepath", None)
 
@@ -216,6 +224,8 @@ async def get_session_history(session_id: str, token: Optional[str] = None):
         "session_id": session_id,
         "implementation_version": impl,
         "conversation_history": history,
+        "structured_history": structured_history,
+        "pending_turn": pending_turn,
         "log_file": log_path,
     }
 
@@ -706,6 +716,66 @@ async def cleanup_old_sessions(background_tasks: BackgroundTasks):
         session_store[session_id]["dialogue_manager"].save_interaction_log()
         del session_store[session_id]
 
+
+def _extract_response_candidates(response_json: str) -> Dict[str, Any]:
+    """Parse model response JSON and normalize response candidates for pending selection."""
+    try:
+        parsed = json.loads(response_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail=f"無法解析對話回應: {exc}")
+
+    raw_responses = parsed.get("responses") or []
+    if isinstance(raw_responses, str):
+        raw_responses = [raw_responses]
+    if not isinstance(raw_responses, list):
+        raw_responses = [str(raw_responses)]
+
+    candidates = [str(item).strip() for item in raw_responses if str(item).strip()]
+    return {
+        "response_dict": parsed,
+        "candidates": candidates,
+        "state": str(parsed.get("state") or "NORMAL"),
+        "dialogue_context": str(parsed.get("dialogue_context") or ""),
+    }
+
+
+def _register_pending_turn(
+    dialogue_manager: Any,
+    *,
+    selection_kind: str,
+    candidate_options: List[str],
+    dialogue_context: str,
+    state: str,
+    source_text: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if hasattr(dialogue_manager, "pending_turn") and getattr(dialogue_manager, "pending_turn", None):
+        logger.warning(
+            "Session already has a pending turn; replacing it with a new one (selection_kind=%s)",
+            selection_kind,
+        )
+    return dialogue_manager.set_pending_turn(
+        selection_kind=selection_kind,
+        candidate_options=candidate_options,
+        dialogue_context=dialogue_context,
+        state=state,
+        speaker_role="patient",
+        source_text=source_text,
+        metadata=metadata or {},
+    )
+
+
+def _attach_pending_selection_metadata(
+    response: DialogueResponse,
+    pending_turn: Dict[str, Any],
+) -> DialogueResponse:
+    response.interaction_mode = "response_selection"
+    response.selection_required = True
+    response.selection_kind = str(pending_turn.get("selection_kind") or "")
+    response.pending_turn_id = str(pending_turn.get("pending_turn_id") or "")
+    response.selection_committed = False
+    return response
+
 # 添加一個輔助函數來處理回應格式化
 async def format_dialogue_response(
     response_json: str,
@@ -875,6 +945,12 @@ async def format_dialogue_response(
             performance_metrics=metrics_dict,  # Phase 5: 性能指標
             processing_info=response_dict.get("processing_info"),
             logs=(session or {}).get("logs") if session else None,
+            interaction_mode=response_dict.get("interaction_mode"),
+            selection_required=response_dict.get("selection_required"),
+            selection_kind=response_dict.get("selection_kind"),
+            pending_turn_id=response_dict.get("pending_turn_id"),
+            selection_committed=response_dict.get("selection_committed"),
+            committed_response=response_dict.get("committed_response"),
         )
         return response
     except Exception as e:
@@ -1209,6 +1285,25 @@ async def process_text_dialogue(
             # 直接使用對話管理器處理
             response_json = await dialogue_manager.process_turn(text)
             logger.debug(f"對話管理器返回結果: {response_json}")
+
+            if hasattr(dialogue_manager, "clear_pending_turn"):
+                dialogue_manager.clear_pending_turn()
+
+            extracted = _extract_response_candidates(response_json)
+            pending_turn = None
+            if extracted["candidates"] and extracted["state"] != "CONFUSED":
+                pending_turn = _register_pending_turn(
+                    dialogue_manager,
+                    selection_kind="patient_response",
+                    candidate_options=extracted["candidates"],
+                    dialogue_context=extracted["dialogue_context"],
+                    state=extracted["state"],
+                    source_text=text,
+                    metadata={
+                        "source_role": "caregiver",
+                        "source_name": "對話方",
+                    },
+                )
             
             # Phase 5: 性能監控 - 記錄成功
             performance_metrics = performance_monitor.end_request(
@@ -1246,6 +1341,8 @@ async def process_text_dialogue(
                 performance_metrics=performance_metrics,  # Phase 5: 傳遞性能指標
                 dialogue_manager=dialogue_manager  # 傳遞對話管理器以獲取優化統計
             )
+            if pending_turn:
+                response = _attach_pending_selection_metadata(response, pending_turn)
             logger.debug(f"返回回應: {response} (版本: {implementation_version})")
         except Exception as e:
             logger.error(f"格式化回應時出錯: {e}", exc_info=True)
@@ -1278,7 +1375,7 @@ async def process_audio_dialogue(
     response_format: Optional[str] = Form("text"),  # 回覆格式，默認為文本
     character_config_json: Optional[str] = Form(None),  # 新增：角色配置 JSON 字符串
 ):
-    """處理音頻對話請求
+    """處理病患困難發聲的音頻對話請求
 
     Args:
         request: 原始請求對象
@@ -1290,7 +1387,7 @@ async def process_audio_dialogue(
         character_config_json: 角色配置的 JSON 字符串 (可選)
 
     Returns:
-        對話回應
+        待病患確認的完整句候選回應
     """
     logger.debug(f"處理音頻對話請求: character_id={character_id}, session_id={session_id}, character_config_json={'提供' if character_config_json else '未提供'}")
     
@@ -1374,25 +1471,23 @@ async def process_audio_dialogue(
     logger.info(f"原始識別文本: '{original_text}'")
     logger.info(f"識別選項 ({len(options_list)}): {options_list}")
     
-    # 將語音識別選項和狀態保存在 DialogueManager 中，供選擇回應時使用
     dialogue_manager = session["dialogue_manager"]
-    if not hasattr(dialogue_manager, 'last_speech_options'):
-        dialogue_manager.last_speech_options = []
-    dialogue_manager.last_speech_options = options_list
-    
-    if not hasattr(dialogue_manager, 'last_response_state'):
-        dialogue_manager.last_response_state = ""
-    dialogue_manager.last_response_state = "WAITING_SELECTION"
-    
-    # 僅儲存「病患自己的話」到對話歷史：將原始識別文本作為病患發言
-    try:
-        patient_name = getattr(dialogue_manager.character, 'name', '病患')
-        orig = (original_text or '').strip()
-        if orig and not orig.startswith("無法識別") and orig != "識別失敗":
-            dialogue_manager.conversation_history.append(f"{patient_name}: {orig}")
-    except Exception:
-        # 若歷史寫入失敗則忽略，不影響主流程
-        pass
+    if hasattr(dialogue_manager, "clear_pending_turn"):
+        dialogue_manager.clear_pending_turn()
+    pending_turn = _register_pending_turn(
+        dialogue_manager,
+        selection_kind="patient_utterance_completion",
+        candidate_options=options_list,
+        dialogue_context="語音選項選擇",
+        state="WAITING_SELECTION",
+        source_text=original_text,
+        metadata={
+            "source_role": "patient",
+            "source_name": getattr(dialogue_manager.character, "name", "病患"),
+            "raw_transcript": raw_transcript,
+            "keyword_completion": keyword_completion,
+        },
+    )
     
     # 獲取實現版本信息
     implementation_version = "optimized"
@@ -1425,6 +1520,7 @@ async def process_audio_dialogue(
         performance_metrics=audio_metrics,
         logs=session.get("logs") if session else None,
     )
+    response = _attach_pending_selection_metadata(response, pending_turn)
 
     _t_resp_prep_end = time.time()
     _t_audio_req_end = time.time()
@@ -1441,7 +1537,7 @@ async def process_audio_dialogue(
     response.performance_metrics["timing_breakdown"] = _timing_breakdown
     logger.info("[Timing] /api/dialogue/audio: %s", _timing_breakdown)
 
-    # 保存語音識別選項到交互日誌（包含 self-annotation 欄位）
+    # 保存病患補句候選到交互日誌（沿用 speech_recognition_options 相容欄位）
     dialogue_manager.log_interaction(
         user_input="[語音輸入]",
         response_options=options_list,
@@ -1467,7 +1563,7 @@ async def process_audio_input_dialogue(
     session_id: Optional[str] = Form(None),
     character_config_json: Optional[str] = Form(None), 
 ):
-    """處理音頻輸入對話請求 (Gemini 直接轉錄 + 對話)"""
+    """處理照護者/醫護語音輸入，轉錄後產生病患候選回應。"""
     logger.debug(f"Processing audio input dialogue request (gemini): character_id={character_id}, session_id={session_id}, character_config_json={'provided' if character_config_json else 'not provided'}")
 
     # 解析角色配置 JSON
@@ -1577,6 +1673,26 @@ async def process_audio_input_dialogue(
         dialogue_manager = session["dialogue_manager"]
         response_json = await dialogue_manager.process_turn(text_input)
 
+        if hasattr(dialogue_manager, "clear_pending_turn"):
+            dialogue_manager.clear_pending_turn()
+
+        extracted = _extract_response_candidates(response_json)
+        pending_turn = None
+        if extracted["candidates"] and extracted["state"] != "CONFUSED":
+            pending_turn = _register_pending_turn(
+                dialogue_manager,
+                selection_kind="patient_response",
+                candidate_options=extracted["candidates"],
+                dialogue_context=extracted["dialogue_context"],
+                state=extracted["state"],
+                source_text=text_input,
+                metadata={
+                    "source_role": "caregiver",
+                    "source_name": "對話方",
+                    "original_transcription": original_text,
+                },
+            )
+
         # Phase 5: 記錄成功
         performance_metrics = performance_monitor.end_request(
             context=monitoring_context,
@@ -1607,7 +1723,9 @@ async def process_audio_input_dialogue(
             performance_metrics=performance_metrics,  # Phase 5: 傳遞性能指標
             dialogue_manager=dialogue_manager  # 傳遞對話管理器以獲取優化統計
         )
-        # 附加候選選項供前端參考（仍為直接模式，不要求再選）
+        if pending_turn:
+            formatted_response = _attach_pending_selection_metadata(formatted_response, pending_turn)
+        # 保留轉錄候選給前端參考；正式流程仍由病患從 responses 中選一句再送回 select_response
         if options:
             formatted_response.speech_recognition_options = options
         # 加入原始轉錄文本
@@ -1648,14 +1766,15 @@ async def process_audio_input_dialogue(
 
 @app.post("/api/dialogue/select_response")
 async def select_response(request: SelectResponseRequest):
-    """處理患者選擇的回應
-    
+    """提交病患最後選定的句子並寫入正式對話歷史。
+
     Args:
-        request: 包含會話ID和選擇的回應
-        
+        request: 包含會話ID和病患選定句子的請求
+
     Returns:
-        成功或失敗的狀態
+        選擇提交結果；不會在此端點觸發新一輪 LLM 生成
     """
+    _t_start = time.time()
     logger.debug(f"處理選擇回應請求: session_id={request.session_id}, selected_response='{request.selected_response}'")
     
     # 檢查會話是否存在
@@ -1670,77 +1789,15 @@ async def select_response(request: SelectResponseRequest):
     session["last_activity"] = asyncio.get_event_loop().time()
     
     try:
-        # 將選擇的回應添加到對話歷史
         dialogue_manager = session["dialogue_manager"]
-        
-        # 檢查對話歷史中的最後一個狀態是否為等待選擇狀態
-        # 使用更可靠的檢測方法，檢查會話屬性而非文本匹配
-        is_after_speech_recognition = False
-        
-        # 1. 檢查是否有語音識別標記
-        if hasattr(dialogue_manager, 'last_response_state') and dialogue_manager.last_response_state == "WAITING_SELECTION":
-            is_after_speech_recognition = True
-            logger.debug("檢測到語音識別狀態標記: WAITING_SELECTION")
-        
-        # 2. 檢查對話日誌中是否有語音識別選項記錄
-        if hasattr(dialogue_manager, 'interaction_log') and dialogue_manager.interaction_log:
-            latest_entries = dialogue_manager.interaction_log[-3:]  # 檢查最近的3個記錄
-            for entry in latest_entries:
-                if isinstance(entry, dict) and 'speech_recognition_options' in entry and entry['speech_recognition_options']:
-                    is_after_speech_recognition = True
-                    logger.debug("檢測到語音識別選項記錄")
-                    break
-        
-        # 3. 檢查選擇的回應是否在最近的語音識別選項列表中
-        if hasattr(dialogue_manager, 'last_speech_options') and dialogue_manager.last_speech_options:
-            # 檢查部分匹配，因為選項可能有些微差異
-            for option in dialogue_manager.last_speech_options:
-                if option in request.selected_response or request.selected_response in option:
-                    is_after_speech_recognition = True
-                    logger.debug(f"選擇的回應與語音選項匹配: {option}")
-                    break
-        
-        # 4. 直接檢查對話內容中的標記或關鍵詞
-        last_entries = dialogue_manager.conversation_history[-3:]  # 檢查最近的3個對話
-        for entry in last_entries:
-            if "語音輸入" in entry or "請從以下選項中選擇" in entry or "語音識別" in entry:
-                is_after_speech_recognition = True
-                logger.debug(f"從對話內容檢測到語音識別相關標記: {entry}")
-                break
-        
-        # 記錄到對話歷史
-        dialogue_manager.conversation_history.append(f"{dialogue_manager.character.name}: {request.selected_response}")
-        
-        # 記錄選擇的回應
-        dialogue_manager.log_interaction(
-            user_input="",  # 空，因為這只是回應選擇
-            response_options=[],  # 空，因為選項已經在之前的請求中記錄
-            selected_response=request.selected_response
+        pending_turn = (
+            dialogue_manager.get_pending_turn()
+            if hasattr(dialogue_manager, "get_pending_turn")
+            else None
         )
-        
-        # 保存交互日誌
-        dialogue_manager.save_interaction_log()
-        
-        # 如果這是語音識別後的選擇，不需要向 Gemini API 發送請求
-        if is_after_speech_recognition:
-            logger.info(f"這是語音識別後的選擇，跳過 Gemini API 處理: {request.selected_response}")
-            
-            # 清除語音識別的狀態標記(如果有)
-            if hasattr(dialogue_manager, 'last_response_state'):
-                dialogue_manager.last_response_state = "NORMAL"
-            if hasattr(dialogue_manager, 'last_speech_options'):
-                dialogue_manager.last_speech_options = []
-            
-            # 直接返回成功訊息，不包含回應
-            return {
-                "status": "success", 
-                "message": "語音識別選擇已記錄",
-                "responses": ["已記錄您的選擇"],
-                "state": "NORMAL",
-                "dialogue_context": "語音識別選擇完成"
-            }
-        
-        # Phase 5: 選擇回應性能監控
+        if pending_turn is None:
+            raise HTTPException(status_code=409, detail="當前會話沒有待確認的病患選項")
+
         performance_monitor = get_performance_monitor()
         implementation_version = session.get("implementation_version", "unknown")
         character_id = session.get("character_id", "unknown")
@@ -1750,41 +1807,69 @@ async def select_response(request: SelectResponseRequest):
             character_id=character_id,
             session_id=request.session_id
         )
-        
-        # 如果不是語音識別後的選擇，正常處理
-        logger.info(f"處理選擇的回應，發送到 Gemini API: {request.selected_response}")
-        try:
-            response_json = await dialogue_manager.process_turn(request.selected_response)
-            
-            # Phase 5: 記錄成功
-            performance_metrics = performance_monitor.end_request(
-                context=monitoring_context,
-                success=True,
-                response_length=len(str(response_json))
-            )
-            
-        except Exception as e:
-            # Phase 5: 記錄失敗
+
+        normalized_selected = str(request.selected_response or "").strip()
+        if not normalized_selected:
             performance_monitor.end_request(
                 context=monitoring_context,
                 success=False,
-                error_message=str(e)
+                error_message="Selected response is empty",
             )
-            raise
+            raise HTTPException(status_code=400, detail="selected_response 不可為空")
+
+        try:
+            committed_turn = dialogue_manager.commit_pending_turn(normalized_selected)
+        except ValueError as validation_error:
+            performance_monitor.end_request(
+                context=monitoring_context,
+                success=False,
+                error_message=str(validation_error),
+            )
+            raise HTTPException(status_code=400, detail=str(validation_error))
+
+        # 記錄選擇的回應
+        dialogue_manager.log_interaction(
+            user_input="",  # 空，因為這只是回應選擇
+            response_options=pending_turn.get("candidate_options", []),
+            selected_response=normalized_selected
+        )
         
-        logger.debug(f"成功記錄選擇的回應: {request.selected_response}")
-        logger.debug(f"對話管理器處理結果: {response_json}")
-        
-        # 構建具有處理結果的回應
-        response_dict = json.loads(response_json)
+        # 保存交互日誌
+        dialogue_manager.save_interaction_log()
+
+        performance_metrics = performance_monitor.end_request(
+            context=monitoring_context,
+            success=True,
+            response_length=len(normalized_selected),
+        )
+        _t_end = time.time()
+        logger.info("[Timing] /api/dialogue/select_response: %s", {
+            'total_s': round(_t_end - _t_start, 4),
+            'path': 'selection_commit',
+            'llm_call': False,
+        })
+        metrics_dict = {
+            "response_time": round(performance_metrics.duration, 3),
+            "timestamp": performance_metrics.timestamp.isoformat(),
+            "success": performance_metrics.success,
+        }
         return {
-            "status": "success", 
+            "status": "success",
             "message": "回應選擇已記錄",
-            "responses": response_dict.get("responses", []),
-            "state": response_dict.get("state", "NORMAL"),
-            "dialogue_context": response_dict.get("dialogue_context", "一般對話")
+            "responses": ["已記錄您的選擇"],
+            "state": pending_turn.get("state", getattr(dialogue_manager.current_state, "value", "NORMAL")),
+            "dialogue_context": pending_turn.get("dialogue_context", "一般對話"),
+            "session_id": request.session_id,
+            "selection_committed": True,
+            "selection_kind": pending_turn.get("selection_kind"),
+            "committed_response": normalized_selected,
+            "interaction_mode": "selection_committed",
+            "performance_metrics": metrics_dict,
+            "committed_turn": committed_turn,
         }
     
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"處理選擇回應時出錯: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"處理選擇回應時出錯: {str(e)}")
