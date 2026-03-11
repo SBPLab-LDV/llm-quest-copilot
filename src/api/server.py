@@ -129,7 +129,7 @@ class DialogueResponse(BaseModel):
     dialogue_context: str
     session_id: str
     inferred_speaker_role: Optional[str] = None  # [已棄用] 保留欄位，總是回傳 None
-    speech_recognition_options: Optional[List[str]] = None  # 新增: 語音識別可能的選項
+    speech_recognition_options: Optional[List[str]] = None  # 相容欄位：語音補句/轉錄候選選項
     original_transcription: Optional[str] = None  # 新增: 原始語音轉錄文本
     raw_transcript: Optional[str] = None  # Self-annotation: 原始轉錄片段
     keyword_completion: Optional[List[Dict[str, Any]]] = None  # Self-annotation: 關鍵詞補全
@@ -1375,7 +1375,7 @@ async def process_audio_dialogue(
     response_format: Optional[str] = Form("text"),  # 回覆格式，默認為文本
     character_config_json: Optional[str] = Form(None),  # 新增：角色配置 JSON 字符串
 ):
-    """處理音頻對話請求
+    """處理病患困難發聲的音頻對話請求
 
     Args:
         request: 原始請求對象
@@ -1387,7 +1387,7 @@ async def process_audio_dialogue(
         character_config_json: 角色配置的 JSON 字符串 (可選)
 
     Returns:
-        對話回應
+        待病患確認的完整句候選回應
     """
     logger.debug(f"處理音頻對話請求: character_id={character_id}, session_id={session_id}, character_config_json={'提供' if character_config_json else '未提供'}")
     
@@ -1537,7 +1537,7 @@ async def process_audio_dialogue(
     response.performance_metrics["timing_breakdown"] = _timing_breakdown
     logger.info("[Timing] /api/dialogue/audio: %s", _timing_breakdown)
 
-    # 保存語音識別選項到交互日誌（包含 self-annotation 欄位）
+    # 保存病患補句候選到交互日誌（沿用 speech_recognition_options 相容欄位）
     dialogue_manager.log_interaction(
         user_input="[語音輸入]",
         response_options=options_list,
@@ -1563,7 +1563,7 @@ async def process_audio_input_dialogue(
     session_id: Optional[str] = Form(None),
     character_config_json: Optional[str] = Form(None), 
 ):
-    """處理音頻輸入對話請求 (Gemini 直接轉錄 + 對話)"""
+    """處理照護者/醫護語音輸入，轉錄後產生病患候選回應。"""
     logger.debug(f"Processing audio input dialogue request (gemini): character_id={character_id}, session_id={session_id}, character_config_json={'provided' if character_config_json else 'not provided'}")
 
     # 解析角色配置 JSON
@@ -1725,7 +1725,7 @@ async def process_audio_input_dialogue(
         )
         if pending_turn:
             formatted_response = _attach_pending_selection_metadata(formatted_response, pending_turn)
-        # 保留 STT 候選給前端參考；正式流程仍由病患從 responses 中選一句再送回 select_response
+        # 保留轉錄候選給前端參考；正式流程仍由病患從 responses 中選一句再送回 select_response
         if options:
             formatted_response.speech_recognition_options = options
         # 加入原始轉錄文本
@@ -1766,13 +1766,13 @@ async def process_audio_input_dialogue(
 
 @app.post("/api/dialogue/select_response")
 async def select_response(request: SelectResponseRequest):
-    """處理患者選擇的回應
+    """提交病患最後選定的句子並寫入正式對話歷史。
 
     Args:
-        request: 包含會話ID和選擇的回應
+        request: 包含會話ID和病患選定句子的請求
 
     Returns:
-        成功或失敗的狀態
+        選擇提交結果；不會在此端點觸發新一輪 LLM 生成
     """
     _t_start = time.time()
     logger.debug(f"處理選擇回應請求: session_id={request.session_id}, selected_response='{request.selected_response}'")
