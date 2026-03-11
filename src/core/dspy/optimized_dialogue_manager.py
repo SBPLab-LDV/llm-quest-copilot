@@ -114,7 +114,12 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             
             # 只有不是重複輸入時才記錄到對話歷史
             if not is_duplicate_input and not is_echo_of_patient:
-                self.conversation_history.append(f"對話方: {user_input}")
+                self.append_confirmed_turn(
+                    speaker_role="caregiver",
+                    speaker_name="對話方",
+                    text=user_input,
+                    turn_type="caregiver_input",
+                )
                 self.logger.info(f"✅ 新輸入已記錄到對話歷史")
             else:
                 reason = "與上一輪對話方輸入重複" if is_duplicate_input else "與上一輪病患選擇回覆相同(回聲抑制)"
@@ -445,7 +450,12 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
                     if choice <= len(responses):
                         selected_response = responses[choice - 1]
                         print(f"\n已選擇選項 {choice}: {selected_response}")
-                        self.conversation_history.append(f"{self.character.name}: {selected_response}")
+                        self.append_confirmed_turn(
+                            speaker_role="patient",
+                            speaker_name=self.character.name,
+                            text=selected_response,
+                            turn_type="patient_response",
+                        )
                         self.log_interaction(user_input, responses, selected_response=selected_response)
                         self.save_interaction_log()
                         return selected_response
@@ -635,10 +645,18 @@ class OptimizedDialogueManagerDSPy(DialogueManager):
             )
 
             # Replace the last caregiver entry with the rewritten question for context continuity
-            if self.conversation_history and self.conversation_history[-1].startswith("對話方: "):
-                self.conversation_history[-1] = f"對話方(重述): {rewritten_question}"
-            else:
-                self.conversation_history.append(f"對話方(重述): {rewritten_question}")
+            replaced = self.replace_last_confirmed_turn(
+                speaker_role="caregiver",
+                speaker_name="對話方",
+                text=rewritten_question,
+            )
+            if replaced is None:
+                self.append_confirmed_turn(
+                    speaker_role="caregiver",
+                    speaker_name="對話方",
+                    text=rewritten_question,
+                    turn_type="caregiver_rewrite",
+                )
 
             rewritten_prediction = self.dialogue_module(
                 user_input=rewritten_question,
