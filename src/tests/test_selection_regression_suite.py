@@ -63,10 +63,18 @@ def _get_json(path: str, expected_status: int = 200) -> requests.Response:
     return response
 
 
-def _select(session_id: str, selected_response: str, expected_status: int = 200) -> Dict[str, Any]:
+def _select(
+    session_id: str,
+    selected_response: str,
+    expected_status: int = 200,
+    allow_custom: bool = False,
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"session_id": session_id, "selected_response": selected_response}
+    if allow_custom:
+        payload["allow_custom"] = True
     response = _post_json(
         "/api/dialogue/select_response",
-        {"session_id": session_id, "selected_response": selected_response},
+        payload,
         expected_status=expected_status,
     )
     return response.json()
@@ -76,11 +84,12 @@ def _history(session_id: str) -> Dict[str, Any]:
     return _get_json(f"/api/dev/session/{session_id}/history").json()
 
 
-def _assert_commit_result(result: Dict[str, Any], selected_response: str) -> None:
+def _assert_commit_result(result: Dict[str, Any], selected_response: str, selection_source: str = "candidate") -> None:
     _assert(result.get("status") == "success", "selection commit did not return success")
     _assert(result.get("selection_committed") is True, "selection_committed should be true")
     _assert(result.get("interaction_mode") == "selection_committed", "unexpected interaction_mode")
     _assert(result.get("committed_response") == selected_response, "committed response mismatch")
+    _assert(result.get("selection_source") == selection_source, "selection_source mismatch")
     _assert(result.get("responses") == ["已記錄您的選擇"], "select_response should only acknowledge commit")
 
 
@@ -220,6 +229,26 @@ def test_selection_failure_paths() -> None:
     _assert("沒有待確認的病患選項" in no_pending_result.get("detail", ""), "missing pending_turn should return 409")
 
 
+def test_custom_selection_commit_flow() -> None:
+    text_result = _post_json(
+        "/api/dialogue/text",
+        {"text": "你現在想跟護理師說什麼？", "character_id": CHARACTER_ID, "response_format": "text"},
+    ).json()
+    session_id = text_result["session_id"]
+    custom_response = "我想自己輸入這一句，因為上面的選項都不適合。"
+
+    rejected = _select(session_id, custom_response, expected_status=400)
+    _assert("does not match current candidate options" in rejected.get("detail", ""), "custom text should require allow_custom")
+
+    custom_result = _select(session_id, custom_response, allow_custom=True)
+    _assert_commit_result(custom_result, custom_response, selection_source="custom")
+
+    history_result = _history(session_id)
+    conversation_history = history_result.get("conversation_history") or []
+    _assert(conversation_history[-1].endswith(custom_response), "custom response missing from history")
+    _assert(history_result.get("pending_turn") is None, "pending_turn should be cleared after custom commit")
+
+
 def main() -> int:
     _assert(os.path.exists(AUDIO_FIXTURE), f"audio fixture not found: {AUDIO_FIXTURE}")
 
@@ -234,6 +263,9 @@ def main() -> int:
 
     test_selection_failure_paths()
     print("selection_failure_paths: PASS")
+
+    test_custom_selection_commit_flow()
+    print("custom_selection_commit_flow: PASS")
 
     print("selection_regression_suite: PASS")
     return 0

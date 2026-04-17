@@ -77,6 +77,7 @@ def main() -> int:
     _assert(select_result.get("selection_committed") is True, "selection was not marked committed")
     _assert(select_result.get("interaction_mode") == "selection_committed", "unexpected select interaction_mode")
     _assert(select_result.get("committed_response") == selected_response, "committed response mismatch")
+    _assert(select_result.get("selection_source") == "candidate", "selection_source should be candidate")
     _assert(select_result.get("responses") == ["已記錄您的選擇"], "select_response should only acknowledge commit")
 
     history_result = _get_json(f"/api/dev/session/{session_id}/history")

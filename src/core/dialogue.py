@@ -223,7 +223,7 @@ class DialogueManager:
     def clear_pending_turn(self) -> None:
         self.pending_turn = None
 
-    def commit_pending_turn(self, selected_response: str) -> Dict[str, Any]:
+    def commit_pending_turn(self, selected_response: str, *, allow_custom: bool = False) -> Dict[str, Any]:
         pending_turn = self.pending_turn
         if pending_turn is None:
             raise ValueError("No pending turn to commit")
@@ -233,7 +233,8 @@ class DialogueManager:
             raise ValueError("Selected response is empty")
 
         candidate_options = pending_turn.get("candidate_options") or []
-        if normalized_response not in candidate_options:
+        is_candidate = normalized_response in candidate_options
+        if not is_candidate and not allow_custom:
             raise ValueError("Selected response does not match current candidate options")
 
         committed_turn = self.append_confirmed_turn(
@@ -247,6 +248,7 @@ class DialogueManager:
             metadata={
                 "source_text": pending_turn.get("source_text", ""),
                 "selection_kind": pending_turn.get("selection_kind", ""),
+                "selection_source": "candidate" if is_candidate else "custom",
                 **(pending_turn.get("metadata") or {}),
             },
         )

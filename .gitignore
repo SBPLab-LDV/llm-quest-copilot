@@ -19,6 +19,7 @@ ui_debug.log
 recordings/
 third_party/
 markitdown/
+shared_context_clean_bundle.zip
 
 # Audio assets (avoid committing mp3)
 *.mp3
