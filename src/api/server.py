@@ -148,6 +148,7 @@ class SelectResponseRequest(BaseModel):
     """選擇回應請求模型"""
     session_id: str
     selected_response: str
+    allow_custom: bool = False
 
 # 會話存儲，用於維護多個客戶端的對話狀態
 session_store: Dict[str, Dict[str, Any]] = {}
@@ -1817,8 +1818,14 @@ async def select_response(request: SelectResponseRequest):
             )
             raise HTTPException(status_code=400, detail="selected_response 不可為空")
 
+        candidate_options = pending_turn.get("candidate_options") or []
+        selection_source = "candidate" if normalized_selected in candidate_options else "custom"
+
         try:
-            committed_turn = dialogue_manager.commit_pending_turn(normalized_selected)
+            committed_turn = dialogue_manager.commit_pending_turn(
+                normalized_selected,
+                allow_custom=request.allow_custom,
+            )
         except ValueError as validation_error:
             performance_monitor.end_request(
                 context=monitoring_context,
@@ -1863,6 +1870,7 @@ async def select_response(request: SelectResponseRequest):
             "selection_committed": True,
             "selection_kind": pending_turn.get("selection_kind"),
             "committed_response": normalized_selected,
+            "selection_source": selection_source,
             "interaction_mode": "selection_committed",
             "performance_metrics": metrics_dict,
             "committed_turn": committed_turn,

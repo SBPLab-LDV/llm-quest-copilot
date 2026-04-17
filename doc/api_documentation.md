@@ -291,40 +291,30 @@ curl -X POST http://localhost:18000/api/dialogue/audio \
 
 #### POST /api/dialogue/select_response
 
-Two-step audio flow — **step 2 of 2**. After [`/api/dialogue/audio`](#post-apidialogueaudio) returns `WAITING_SELECTION`, call this endpoint with the user's chosen transcription option.
+Selection flow — **step 2 of 2**. After `/api/dialogue/text`, `/api/dialogue/audio`, or `/api/dialogue/audio_input` returns selectable candidates, call this endpoint with the user's chosen patient response.
 
-If the selection is recognized as a post-speech-recognition choice, it is recorded without invoking the dialogue model. Otherwise, the selected text is forwarded to the dialogue model for a full dialogue turn.
+By default, `selected_response` must match one current candidate exactly after trimming leading/trailing whitespace. If the user typed their own response because none of the candidates fit, send `allow_custom=true`.
 
 **Request** (`application/json`)
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `session_id` | string | Yes | Session ID from the preceding `/audio` call |
-| `selected_response` | string | Yes | The transcription option the user selected |
+| `session_id` | string | Yes | Session ID from the preceding candidate-producing call |
+| `selected_response` | string | Yes | Candidate text, or user-entered text when `allow_custom=true` |
+| `allow_custom` | boolean | No | Set to `true` only when committing user-entered text that is not one of the candidates |
 
 **Response** `200 OK`
-
-When recognized as a speech-recognition selection (most common case):
-
-```json
-{
-  "status": "success",
-  "message": "語音識別選擇已記錄",
-  "responses": ["已記錄您的選擇"],
-  "state": "NORMAL",
-  "dialogue_context": "語音識別選擇完成"
-}
-```
-
-When treated as a new dialogue turn (fallback):
 
 ```json
 {
   "status": "success",
   "message": "回應選擇已記錄",
-  "responses": ["護理師的回覆..."],
+  "responses": ["已記錄您的選擇"],
   "state": "NORMAL",
-  "dialogue_context": "一般對話"
+  "dialogue_context": "一般對話",
+  "selection_committed": true,
+  "committed_response": "我想了解手術的流程",
+  "selection_source": "candidate"
 }
 ```
 
@@ -333,6 +323,8 @@ When treated as a new dialogue turn (fallback):
 | Code | Condition |
 |---|---|
 | `404` | Session not found |
+| `409` | Current session has no pending candidate selection |
+| `400` | Empty response, or non-candidate response without `allow_custom=true` |
 | `500` | Dialogue processing error |
 
 **curl Example**
@@ -343,6 +335,18 @@ curl -X POST http://localhost:18000/api/dialogue/select_response \
   -d '{
     "session_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     "selected_response": "我想了解手術的流程"
+  }'
+```
+
+For custom user-entered text:
+
+```bash
+curl -X POST http://localhost:18000/api/dialogue/select_response \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "selected_response": "我想自己輸入這一句，因為上面的選項都不適合。",
+    "allow_custom": true
   }'
 ```
 
